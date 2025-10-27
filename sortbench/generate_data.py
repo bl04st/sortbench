@@ -29,10 +29,9 @@ def main():
 
     # Set types based on mode
     if args.mode == 'basic':
-        types = ['integer', 'float', 'word']
-        type_names = ['Int-0:1000', 'Float-0:1000', 'English']
-        
-        gen_kwargs = [kwargs_normal_range, kwargs_normal_range, {}]
+        types = ['integer', 'float', 'word', 'prefix_word', 'hexadecimal_string', 'string_upper'] # Added hexadecimal_string type
+        type_names = ['Int-0:1000', 'Float-0:1000', 'English', 'PrefixEnglish', 'Hexadecimal-0:1000', 'UppercaseString'] # Added PrefixEnglish and Hexadecimal types
+        gen_kwargs = [kwargs_normal_range, kwargs_normal_range, {}, {}, kwargs_normal_range, {}] # Added kwargs for PrefixEnglish and Hexadecimal types
     elif args.mode == 'advanced':
         types = ['integer', 'integer', 'float', 'float', 'float',
                  'string_lower', 'string', 'prefix_word', 'number_string']
@@ -47,19 +46,19 @@ def main():
                       'NumberWords']
         gen_kwargs = [kwargs_large_range, kwargs_neg_range, kwargs_large_range, kwargs_small_float, kwargs_neg_range, {}, {}, {}, kwargs_number_words]
     elif args.mode == 'debug':
-        types = ['integer', 'float', 'word', 'integer', 'float', 'word']
-        type_names = ['Int-Sorted', 'Float-Sorted', 'English-Sorted', 'Int-Duplicate', 'Float-Duplicate', 'English-Duplicate']
+        types = ['integer', 'float', 'word', 'integer', 'float', 'word', 'hexadecimal_string'] # Added hexadecimal_string type
+        type_names = ['Int-Sorted', 'Float-Sorted', 'English-Sorted', 'Int-Duplicate', 'Float-Duplicate', 'English-Duplicate', 'Hex-Sorted'] # Added Hex-Sorted type
         kwargs_normal_range_sorted = kwargs_normal_range.copy()
         kwargs_normal_range_sorted['sorted'] = True
         kwargs_normal_range_duplicates = kwargs_normal_range.copy()
         kwargs_normal_range_duplicates['duplicates'] = True
-        gen_kwargs = [kwargs_normal_range_sorted, kwargs_normal_range_sorted, {'sorted': True}, kwargs_normal_range_duplicates, kwargs_normal_range_duplicates, {'duplicates': True}]
+        gen_kwargs = [kwargs_normal_range_sorted, kwargs_normal_range_sorted, {'sorted': True}, kwargs_normal_range_duplicates, kwargs_normal_range_duplicates, {'duplicates': True}, kwargs_normal_range_sorted] # Added kwargs for Hex-Sorted type
                       
     else:
         raise ValueError("Mode must be 'basic' or 'advanced'")
 
     # Sizes are fixed for now
-    sizes = [int(math.pow(2, i)) for i in range(1, 9)]
+    sizes = [8 for i in range(1, 9)]#[int(math.pow(2, i)) for i in range(1, 9)]
 
     # Configure name
     name = args.name+'_'+args.mode

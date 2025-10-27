@@ -19,6 +19,7 @@ def generate_unsorted_list(n=10, lst_type='integer', **kwargs):
     - number_string: random number strings between min_value and max_value
     - prefix_string: random strings of 8 characters with a prefix of 3 characters that are equal
     - prefix_word: random words from the NLTK wordnet corpus with a prefix of 3 characters that are equal. Words with apostrophes are excluded.
+    - hexadecimal_string: random hexadecimal strings between min_value and max_value (not implemented yet)
 
     The random seed should be controlled by the caller if reproducibility is desired. Use random.seed() from the random module.
 
@@ -36,7 +37,7 @@ def generate_unsorted_list(n=10, lst_type='integer', **kwargs):
     if n<=0:
         raise ValueError("n must be a positive integer")
     
-    supported_types = ['integer', 'float', 'string', 'string_lower', 'string_upper', 'word', 'number_string', 'prefix_string', 'prefix_word']
+    supported_types = ['integer', 'float', 'string', 'string_lower', 'string_upper', 'word', 'number_string', 'prefix_string', 'prefix_word', 'hexadecimal_string']
     if lst_type not in supported_types:
         raise ValueError(f"Type must be in {supported_types}, got: {lst_type}")
     min_value = kwargs.get('min_value', 0)
@@ -84,6 +85,9 @@ def generate_unsorted_list(n=10, lst_type='integer', **kwargs):
         words = [word for word in words if "'" not in word]
         word_smpl = random.sample(words, n)
         result = [f"{prefix_letter*3}{word}" for word in word_smpl]
+    elif lst_type == 'hexadecimal_string':
+        numbers = random.sample(range(min_value, max_value), n)
+        result = [hex(number) for number in numbers]
     else:
         raise ValueError("Unknown type")
     

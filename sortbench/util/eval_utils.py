@@ -1,7 +1,60 @@
 import os
 import re
 import pandas as pd
+import numpy as np
+from difflib import SequenceMatcher
 from collections import Counter
+
+def compute_numeric_similarity_reversed(unsorted_list, reversed_list):
+    """
+    Compute the numeric similarity between two lists of items.
+
+    Parameters:
+    - unsorted_list (list): First list of items.
+    - reversed_list (list): Second list of items. List should be the reversed version of the first list.
+
+    Returns:
+    - float: Numeric similarity between the two lists.
+    """
+    unsorted_list_reverse = list(reversed(unsorted_list))
+    try:
+        original = np.array(unsorted_list_reverse, dtype=float)
+        predicted = np.array(reversed_list[:len(original)], dtype=float)
+        max_val = max(original.max(), predicted.max(), 1e-9)
+        original = original / max_val
+        predicted = predicted / max_val
+        diff = np.abs(original - predicted).mean()
+        return round(1 - diff, 6)
+    except Exception:
+        # Fallback: fuzzy string similarity
+        n = min(len(unsorted_list_reverse), len(reversed_list))
+        scores = [
+            SequenceMatcher(None, str(unsorted_list_reverse[i]), str(reversed_list[i])).ratio()
+            for i in range(n)
+        ]
+        return round(sum(scores) / len(scores), 6) if scores else 0.0
+    
+
+def count_non_matching_items_reversed(unsorted_list, reversed_list):
+    """
+    Count the number of items that are not in the correct position in the reversed list compared to the unsorted list.
+
+    Parameters:
+    - unsorted_list (list): A list of items.
+    - reversed_list (list): A reversed version of the unsorted list
+
+    Returns:
+    - int: The number of items that are not in the correct position.
+    """
+    count = 0
+    unsorted_list_reverse = list(reversed(unsorted_list))
+    min_length = min(len(unsorted_list_reverse), len(reversed_list))
+    for i in range(min_length):
+        if unsorted_list_reverse[i] != reversed_list[i]:
+            count += 1
+    # count remaining items in the longer list as incorrect
+    count += abs(len(unsorted_list_reverse) - len(reversed_list))
+    return count
 
 def count_unordered_pairs(lst):
     """
@@ -20,6 +73,23 @@ def count_unordered_pairs(lst):
                 count += 1
     return count
 
+def count_unordered_pairs_descending(lst):
+    """
+    Count the number of unordered pairs in a list.
+    
+    Parameters:
+    - lst (list): A list of integers.
+
+    Returns:
+    - int: The number of unordered pairs in the list.
+    """
+    count = 0
+    for i in range(len(lst)):
+        for j in range(i + 1, len(lst)):
+            if lst[i] < lst[j]:
+                count += 1
+    return count
+
 def count_unordered_neighbors(lst):
     """
     Count the number of unordered neighbors in a list.
@@ -33,6 +103,22 @@ def count_unordered_neighbors(lst):
     count = 0
     for i in range(len(lst) - 1):
         if lst[i] > lst[i + 1]:
+            count += 1
+    return count
+
+def count_unordered_neighbors_descending(lst):
+    """
+    Count the number of unordered neighbors in a list.
+
+    Parameters:
+    - lst (list): A list of integers.
+
+    Returns:
+    - int: The number of unordered neighbors in the list.
+    """
+    count = 0
+    for i in range(len(lst) - 1):
+        if lst[i] < lst[i + 1]:
             count += 1
     return count
 
@@ -608,6 +694,163 @@ def eval_str_list(str_list, expected_type, debug=True, config_name='config', mod
                     break
             
     return (sorted_list, error_type, is_list, has_ellipsis, required_type_parsing)
+
+def get_result_dict(benchmark_name, bench_type, benchmark_mode, benchmark_version, model, data_type, list_length,
+list_name, unordered_pairs_before=None, unordered_pairs_after=None, unordered_neighbors_before=None, unordered_neighbors_after=None,
+count_missing=None, count_additional=None, numeric_similarity=None, incorrect_items=None, out_list_len=None, num_chars=None,
+thinking_length=None, is_parsed=None, error_type=None, is_list=None, has_ellipsis=None, required_type_parsing=None):
+
+    return {
+        'Benchmark': benchmark_name,
+        'Benchmark Type': bench_type,
+        'Mode': benchmark_mode,
+        'Version': benchmark_version,
+        'Model': model,
+        'Type': data_type,
+        'Size': list_length,
+        'List Name': list_name,
+        'Unordered Pairs Before': unordered_pairs_before,
+        'Unordered Pairs After': unordered_pairs_after,
+        'Unordered Neighbors Before': unordered_neighbors_before,
+        'Unordered Neighbors After': unordered_neighbors_after,
+        'Missing Items': count_missing,
+        'Additional Items': count_additional,
+        'Numeric Similarity': numeric_similarity,
+        'Incorrect Items': incorrect_items,
+        'Output List Length': out_list_len,
+        'Output Length': num_chars,
+        'Thinking Length': thinking_length,
+        'Parsed': is_parsed,
+        'HasError': error_type is not None,
+        'ErrorType': error_type,    
+        'IsList': is_list,
+        'HasEllipsis': has_ellipsis,
+        'RequiredTypeParsing': required_type_parsing
+    }
+
+
+def eval_sort_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, sorted_list in cur_result['sorted_lists'].items():
+        unsorted_list = unsorted_lists[list_name]
+        expected_type = type(unsorted_list[0])
+        num_chars = len(sorted_list)
+        thinking_length = 0
+        thinking_pos = sorted_list.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(sorted_list[:thinking_pos+8])
+        sorted_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(sorted_list, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+        if sorted_list is None:
+            unordered_pairs_before = None
+            unordered_pairs_after = None
+            unordered_neighbors_before = None
+            unordered_neighbors_after = None
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            unordered_pairs_before = count_unordered_pairs(unsorted_list)
+            unordered_pairs_after = count_unordered_pairs(sorted_list)
+            unordered_neighbors_before = count_unordered_neighbors(unsorted_list)
+            unordered_neighbors_after = count_unordered_neighbors(sorted_list)
+            count_missing = count_missing_items(unsorted_list, sorted_list)
+            count_additional = count_additional_items(unsorted_list, sorted_list)
+            out_list_len = len(sorted_list)
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, bench_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name,
+            unordered_pairs_before=unordered_pairs_before, unordered_pairs_after=unordered_pairs_after, unordered_neighbors_before=unordered_neighbors_before,
+            unordered_neighbors_after=unordered_neighbors_after, count_missing=count_missing, count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list, has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
+
+def eval_sort_descending_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, sorted_list in cur_result['sorted_lists_descending'].items():
+        unsorted_list = unsorted_lists[list_name]
+        expected_type = type(unsorted_list[0])
+        num_chars = len(sorted_list)
+        thinking_length = 0
+        thinking_pos = sorted_list.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(sorted_list[:thinking_pos+8])
+        sorted_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(sorted_list, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+        if sorted_list is None:
+            unordered_pairs_before = None
+            unordered_pairs_after = None
+            unordered_neighbors_before = None
+            unordered_neighbors_after = None
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            unordered_pairs_before = count_unordered_pairs_descending(unsorted_list)
+            unordered_pairs_after = count_unordered_pairs_descending(sorted_list)
+            unordered_neighbors_before = count_unordered_neighbors_descending(unsorted_list)
+            unordered_neighbors_after = count_unordered_neighbors_descending(sorted_list)
+            count_missing = count_missing_items(unsorted_list, sorted_list)
+            count_additional = count_additional_items(unsorted_list, sorted_list)
+            out_list_len = len(sorted_list)
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, bench_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name,
+            unordered_pairs_before=unordered_pairs_before, unordered_pairs_after=unordered_pairs_after, unordered_neighbors_before=unordered_neighbors_before,
+            unordered_neighbors_after=unordered_neighbors_after, count_missing=count_missing, count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list, has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
+
+def eval_reverse_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, reversed_list in cur_result['reversed_lists'].items():
+        unsorted_list = unsorted_lists[list_name]
+        expected_type = type(unsorted_list[0])
+        num_chars = len(reversed_list)
+        thinking_length = 0
+        thinking_pos = reversed_list.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(reversed_list[:thinking_pos+8])
+        reversed_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(reversed_list, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+        if reversed_list is None:
+            incorrect_items = None
+            cosine_similarity = None
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            incorrect_items = count_non_matching_items_reversed(unsorted_list, reversed_list)
+            numeric_similarity = compute_numeric_similarity_reversed(unsorted_list, reversed_list)
+            count_missing = count_missing_items(unsorted_list, reversed_list)
+            count_additional = count_additional_items(unsorted_list, reversed_list)
+            out_list_len = len(reversed_list)
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, bench_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name,
+            incorrect_items=incorrect_items, numeric_similarity=numeric_similarity, count_missing=count_missing,
+            count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list,
+            has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
     
 
 def evaluate_results(results):
@@ -632,61 +875,23 @@ def evaluate_results(results):
         
         for cur_result in config_data['results']:
             model = cur_result['model']
-            for list_name, sorted_list in cur_result['sorted_lists'].items():
-                unsorted_list = unsorted_lists[list_name]
-                expected_type = type(unsorted_list[0])
-                num_chars = len(sorted_list)
-                thinking_length = 0
-                thinking_pos = sorted_list.rfind('</think>')
-                if thinking_pos!=-1:
-                    thinking_length = deepseek_numtokens(sorted_list[:thinking_pos+8])
-                sorted_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(sorted_list, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
-                if sorted_list is None:
-                    unordered_pairs_before = None
-                    unordered_pairs_after = None
-                    unordered_neighbors_before = None
-                    unordered_neighbors_after = None
-                    count_missing = None
-                    count_additional = None
-                    out_list_len = None
-                    is_parsed = False
-                else:
-                    unordered_pairs_before = count_unordered_pairs(unsorted_list)
-                    unordered_pairs_after = count_unordered_pairs(sorted_list)
-                    unordered_neighbors_before = count_unordered_neighbors(unsorted_list)
-                    unordered_neighbors_after = count_unordered_neighbors(sorted_list)
-                    count_missing = count_missing_items(unsorted_list, sorted_list)
-                    count_additional = count_additional_items(unsorted_list, sorted_list)
-                    out_list_len = len(sorted_list)
-                    is_parsed = True
+            bench_type = cur_result['bench_type']
+            match (bench_type):
+                case "sort":
+                    temp_results = eval_sort_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length)
+                    for res in temp_results:
+                        results_with_eval.append(res)
+                case "sort-descending":
+                    temp_results = eval_sort_descending_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length)
+                    for res in temp_results:
+                        results_with_eval.append(res)
+                case "reverse":
+                    temp_results = eval_reverse_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length)
+                    for res in temp_results:
+                        results_with_eval.append(res)
+                case _:
+                    print(f'Unknown benchmark type: {bench_type}')
 
-                result_dict = {
-                    'Benchmark': benchmark_name,
-                    'Mode': benchmark_mode,
-                    'Version': benchmark_version,
-                    'Model': model,
-                    'Type': data_type,
-                    'Size': list_length,
-                    'List Name': list_name,
-                    'Unordered Pairs Before': unordered_pairs_before,
-                    'Unordered Pairs After': unordered_pairs_after,
-                    'Unordered Neighbors Before': unordered_neighbors_before,
-                    'Unordered Neighbors After': unordered_neighbors_after,
-                    'Missing Items': count_missing,
-                    'Additional Items': count_additional,
-                    'Output List Length': out_list_len,
-                    'Output Length': num_chars,
-                    'Thinking Length': thinking_length,
-                    'Parsed': is_parsed,
-                    'HasError': error_type is not None,
-                    'ErrorType': error_type,
-                    'IsList': is_list,
-                    'HasEllipsis': has_ellipsis,
-                    'RequiredTypeParsing': required_type_parsing
-                }
-
-                results_with_eval.append(result_dict)
-    
     df_results = pd.DataFrame(results_with_eval)
     df_results = normalize_metrics(df_results)
     df_results = compute_total_score(df_results)
@@ -755,12 +960,22 @@ def normalize_metrics(df_results):
     Returns:
     - df_results: DataFrame with the normalized metrics
     """
+    print(df_results.columns.tolist())
 
     df_results['Unordered Pairs (%)'] = df_results['Unordered Pairs After']/(df_results['Output List Length']*(df_results['Output List Length']-1)/2)
     df_results['Unordered Neighbors (%)'] = df_results['Unordered Neighbors After']/df_results['Output List Length'] # TODO: size is only for the original list, sorted list might have different length. this is buggy
+    df_results['Incorrect Items (%)'] = (df_results['Incorrect Items']/df_results['Size']).clip(upper=1)
     df_results['Missing Items (%)'] = (df_results['Missing Items']/df_results['Size']).clip(upper=1)
     df_results['Additional Items (%)'] = (df_results['Additional Items']/df_results['Size']).clip(upper=1)
     return df_results
+
+def calc_score(row):
+    if row['Benchmark Type'] == 'sort' or row['Benchmark Type'] == 'sort-descending':
+        return 1 - (row['Unordered Pairs (%)'] + row['Unordered Neighbors (%)'])/2
+    elif row['Benchmark Type'] == 'reverse':
+        return 1 - (row['Incorrect Items (%)'] + (1 - row['Numeric Similarity']))/2
+    else:
+        return np.nan
 
 def compute_total_score(df_results):
     """
@@ -780,10 +995,10 @@ def compute_total_score(df_results):
     df_results.loc[(df_results['Parsed']==True) & (df_results['HasError']==False) & (df_results['RequiredTypeParsing']==True), 'Validity Score'] = 0.75
     df_results.loc[(df_results['Parsed']==True) & (df_results['HasError']==False) & (df_results['IsList']==True) & (df_results['HasEllipsis']==False) & (df_results['RequiredTypeParsing']==False), 'Validity Score'] = 1.0
 
-    df_results['Sorting Score'] = 1-(df_results['Unordered Pairs (%)'] + df_results['Unordered Neighbors (%)'])/2
+    df_results['Benchmark Score'] = df_results.apply(calc_score, axis=1)
     df_results['Faithfulness Score'] = 1-(df_results['Missing Items (%)'] + df_results['Additional Items (%)'])/2
-    df_results.loc[df_results['Validity Score']>0, 'SortBench Score'] = df_results['Validity Score']*(df_results['Sorting Score'] + df_results['Faithfulness Score'])/2
-    df_results.loc[df_results['Validity Score']==0, 'SortBench Score'] = 0
+    df_results.loc[df_results['Validity Score']>0, 'Overall Score'] = df_results['Validity Score']*(df_results['Benchmark Score'] + df_results['Faithfulness Score'])/2
+    df_results.loc[df_results['Validity Score']==0, 'Overall Score'] = 0
     return df_results
 
 from transformers import AutoTokenizer
