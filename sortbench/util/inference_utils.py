@@ -3,8 +3,10 @@ import time
 import traceback
 import random
 import warnings
+import string
 
 from util.result_utils import check_if_result_available
+from nltk.corpus import wordnet
 
 from openai import OpenAI, InternalServerError
 import anthropic
@@ -14,7 +16,9 @@ _INNCUBE_MODELS = ["llama3.1", "gemma2", "qwen2.5", "deepseekr1"]
 _ANTROPIC_MODELS = ["claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022"]
 _GOOGLE_GEMINI_MODELS = ["gemini-2.5-flash"]
 
-_BENCHMARK_TYPES = ["sort", "sort-descending", "reverse", "count", "index", "map", "sum", "min", "product"]
+LIST_BENCHMARK_TYPES = ["sort", "sort-descending", "reverse", "insert", "pop", "map"]
+SINGLE_RESULT_BENCHMARK_TYPES = ["count", "index", "sum", "min", "max", "product"]
+
 
 def is_model_supported(model):
     """
@@ -32,7 +36,19 @@ def is_benchmark_type_supported(bench_type):
     Parameters:
     - bench_type (str): the benchmark type
     """
-    return bench_type in _BENCHMARK_TYPES
+    return bench_type in LIST_BENCHMARK_TYPES + SINGLE_RESULT_BENCHMARK_TYPES
+
+def get_single_result_benchmark_types():
+    """
+    Get the list of supported single result benchmark types.
+    """
+    return SINGLE_RESULT_BENCHMARK_TYPES
+
+def get_list_benchmark_types():
+    """
+    Get the list of supported list benchmark types.
+    """
+    return LIST_BENCHMARK_TYPES
 
 def sort_list_with_google_gemini_api(unsorted_list, model, system_prompt=None, prompt=None):
     """
@@ -176,6 +192,27 @@ def sort_list_with_openai_api(unsorted_list, api_key, model, url=None, use_strea
     
     return sorted_list
 
+def call_llm_model_api(model, unsorted_list, system_prompt=None, prompt=None):
+    """
+    API call to the specified LLM model.
+    """
+
+    if model in _OPENAI_MODELS:
+        api_key = os.getenv("OPENAI_API_KEY")
+        return sort_list_with_openai_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
+    elif model in _INNCUBE_MODELS:
+        api_key = os.getenv("INNCUBE_API_KEY")
+        endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
+        return sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt)
+    elif model in _ANTROPIC_MODELS:
+        api_key = os.getenv("ANTROPIC_API_KEY")
+        return sort_list_with_antropic_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
+    elif model in _GOOGLE_GEMINI_MODELS:
+        return sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
+    else:
+        raise ValueError(f"Model {model} not supported")
+
+
 def sort_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose=False, descending=False):
     """
     Sort all unsorted lists in a configuration using the specified model.
@@ -203,20 +240,8 @@ def sort_unsorted_lists_in_config(model, config_name, lists, cur_results, result
                 print(f"Sorting list {unsorted_list_name} using model {model} for config {config_name}")
             elif verbose and descending:
                 print(f"Sorting list {unsorted_list_name} in descending order using model {model} for config {config_name}")
-            if model in _OPENAI_MODELS:
-                api_key = os.getenv("OPENAI_API_KEY")
-                sorted_list = sort_list_with_openai_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _INNCUBE_MODELS:
-                api_key = os.getenv("INNCUBE_API_KEY")
-                endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
-                sorted_list = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt)
-            elif model in _ANTROPIC_MODELS:
-                api_key = os.getenv("ANTROPIC_API_KEY")
-                sorted_list = sort_list_with_antropic_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _GOOGLE_GEMINI_MODELS:
-                sorted_list = sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
-            else:
-                raise ValueError(f"Model {model} not supported")
+
+            sorted_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             if descending:
                 cur_results['sorted_lists_descending'][unsorted_list_name] = sorted_list
             else:
@@ -247,26 +272,13 @@ def reverse_unsorted_lists_in_config(model, config_name, lists, cur_results, res
     """
     try:
         for unsorted_list_name, unsorted_list in lists.items():
-
             system_prompt = "Your task is to reverse a list according to the common list.reverse() operation in Python. The output must only contain the reversed list and nothing else. The format of the list must stay the same."
             prompt = f"Reverse the following list: {unsorted_list}"
 
             if verbose:
                 print(f"Reversing list {unsorted_list_name} using model {model} for config {config_name}")
-            if model in _OPENAI_MODELS:
-                api_key = os.getenv("OPENAI_API_KEY")
-                sorted_list = sort_list_with_openai_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _INNCUBE_MODELS:
-                api_key = os.getenv("INNCUBE_API_KEY")
-                endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
-                sorted_list = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt)
-            elif model in _ANTROPIC_MODELS:
-                api_key = os.getenv("ANTROPIC_API_KEY")
-                sorted_list = sort_list_with_antropic_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _GOOGLE_GEMINI_MODELS:
-                sorted_list = sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
-            else:
-                raise ValueError(f"Model {model} not supported")
+            
+            sorted_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['reversed_lists'][unsorted_list_name] = sorted_list
 
         if config_name in results:
@@ -303,21 +315,9 @@ def map_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             prompt = f"Apply this function to all list elements: {map_func}.\nThe list is: {unsorted_list}"
             if verbose:
                 print(f"Mapping list {unsorted_list_name} using mapping function \"{map_func}\" using model {model} for config {config_name}")
-            if model in _OPENAI_MODELS:
-                api_key = os.getenv("OPENAI_API_KEY")
-                sorted_list = sort_list_with_openai_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _INNCUBE_MODELS:
-                api_key = os.getenv("INNCUBE_API_KEY")
-                endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
-                sorted_list = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt)
-            elif model in _ANTROPIC_MODELS:
-                api_key = os.getenv("ANTROPIC_API_KEY")
-                sorted_list = sort_list_with_antropic_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _GOOGLE_GEMINI_MODELS:
-                sorted_list = sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
-            else:
-                raise ValueError(f"Model {model} not supported")
-            cur_results['mapped_lists'][unsorted_list_name] = sorted_list
+
+            mapped_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            cur_results['mapped_lists'][unsorted_list_name] = mapped_list
 
         if config_name in results:
             results[config_name]['results'].append(cur_results)
@@ -349,20 +349,7 @@ def count_unsorted_list_items_in_config(model, config_name, lists, cur_results, 
             prompt = f"Count the number of items in this list: {unsorted_list}."
             if verbose:
                 print(f"Counting items in list {unsorted_list_name} using model {model} for config {config_name}")
-            if model in _OPENAI_MODELS:
-                api_key = os.getenv("OPENAI_API_KEY")
-                count = sort_list_with_openai_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _INNCUBE_MODELS:
-                api_key = os.getenv("INNCUBE_API_KEY")
-                endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
-                count = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt)
-            elif model in _ANTROPIC_MODELS:
-                api_key = os.getenv("ANTROPIC_API_KEY")
-                count = sort_list_with_antropic_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _GOOGLE_GEMINI_MODELS:
-                count = sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
-            else:
-                raise ValueError(f"Model {model} not supported")
+            count = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['list_counts'][unsorted_list_name] = count
 
         if config_name in results:
@@ -395,21 +382,116 @@ def get_index_values_in_config(model, config_name, lists, cur_results, results, 
             prompt = f"Get the item at index {index} from this list: {unsorted_list}."
             if verbose:
                 print(f"Getting item from list {unsorted_list_name} using model {model} for config {config_name}")
-            if model in _OPENAI_MODELS:
-                api_key = os.getenv("OPENAI_API_KEY")
-                value = sort_list_with_openai_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _INNCUBE_MODELS:
-                api_key = os.getenv("INNCUBE_API_KEY")
-                endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
-                value = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt)
-            elif model in _ANTROPIC_MODELS:
-                api_key = os.getenv("ANTROPIC_API_KEY")
-                value = sort_list_with_antropic_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _GOOGLE_GEMINI_MODELS:
-                value = sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
-            else:
-                raise ValueError(f"Model {model} not supported")
+            
+            value = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['index_values'][unsorted_list_name] = value
+            cur_results['index_used'][unsorted_list_name] = index
+
+        if config_name in results:
+            results[config_name]['results'].append(cur_results)
+        else:
+            results[config_name] = {'unsorted_lists': lists,
+                                    'results': [cur_results]}
+    except Exception as e:
+        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(traceback.format_exc())
+
+    return results
+
+def get_random_unique_string(unsorted_list, length=5):
+    while True:
+        s = ''.join(random.choices(string.ascii_lowercase, k=length))
+        if s not in unsorted_list:
+            return s
+
+def get_random_unique_integer(unsorted_list, min_value=0, max_value=100):
+    while True:
+        n = random.randint(min_value, max_value)
+        if n not in unsorted_list:
+            return n
+        
+def get_random_unique_float(unsorted_list, min_value=0.0, max_value=100.0):
+    while True:
+        n = random.uniform(min_value, max_value)
+        if n not in unsorted_list:
+            return n
+        
+def get_random_unique_word(unsorted_list):
+    words = list(set(wordnet.words()))
+    words = [word for word in words if "'" not in word]
+    while True:
+        w = random.choice(words)
+        if w not in unsorted_list:
+            return w
+
+def insert_values_in_config(model, config_name, lists, cur_results, results, verbose=False):
+    """
+    Insert a value at a random index in all unsorted lists in a configuration using the specified model.
+
+    Parameters:
+    - model (str): the model to use for inference
+    - config_name (str): the name of the configuration
+    - lists (dict): the dictionary of lists
+    - cur_results (dict): the current results dictionary
+    - results (dict): the overall results dictionary
+    - verbose (bool): whether to print verbose output
+    """
+    try:
+        for unsorted_list_name, unsorted_list in lists.items():
+            index = random.randint(0, len(unsorted_list)) # allow insertion at end of list
+            item = None
+            if all(isinstance(x, int) for x in unsorted_list):
+                item = get_random_unique_integer(unsorted_list)
+            elif all(isinstance(x, float) for x in unsorted_list):
+                item = get_random_unique_float(unsorted_list)
+            elif all(isinstance(x, str) for x in unsorted_list):
+                item = get_random_unique_word(unsorted_list)
+            else:
+                warnings.warn(f"List {unsorted_list_name} contains mixed types, cannot insert item")
+                continue
+            system_prompt = f"Your task is to insert an item at a specific index, starting at index 0, into a list. The output must only contain the complete list with the inserted element and nothing else."
+            prompt = f"Insert the item {item} at index {index} into this list: {unsorted_list}."
+            if verbose:
+                print(f"Inserting item {item} at index {index} into list {unsorted_list_name} using model {model} for config {config_name}")
+            
+            insert_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            cur_results['insert_lists'][unsorted_list_name] = insert_list
+            cur_results['index_used'][unsorted_list_name] = index
+            cur_results['item_used'][unsorted_list_name] = item
+
+        if config_name in results:
+            results[config_name]['results'].append(cur_results)
+        else:
+            results[config_name] = {'unsorted_lists': lists,
+                                    'results': [cur_results]}
+    except Exception as e:
+        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(traceback.format_exc())
+
+    return results
+
+def pop_values_in_config(model, config_name, lists, cur_results, results, verbose=False):
+    """
+    Remove a value at a random index in all unsorted lists in a configuration using the specified model.
+
+    Parameters:
+    - model (str): the model to use for inference
+    - config_name (str): the name of the configuration
+    - lists (dict): the dictionary of lists
+    - cur_results (dict): the current results dictionary
+    - results (dict): the overall results dictionary
+    - verbose (bool): whether to print verbose output
+    """
+    try:
+        for unsorted_list_name, unsorted_list in lists.items():
+            index = random.randint(0, len(unsorted_list)-1)
+            system_prompt = f"Your task is to remove an item at a specific index, starting at index 0, from a list. The output must only contain the complete list without the removed element and nothing else."
+            prompt = f"Remove the item at index {index} from this list: {unsorted_list}."
+            if verbose:
+                print(f"Removing item at index {index} from list {unsorted_list_name} using model {model} for config {config_name}")
+
+            pop_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            cur_results['pop_lists'][unsorted_list_name] = pop_list
             cur_results['index_used'][unsorted_list_name] = index
 
         if config_name in results:
@@ -442,21 +524,9 @@ def sum_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             prompt = f"Get the sum from this list: {unsorted_list}."
             if verbose:
                 print(f"Getting sum from list {unsorted_list_name} using model {model} for config {config_name}")
-            if model in _OPENAI_MODELS:
-                api_key = os.getenv("OPENAI_API_KEY")
-                value = sort_list_with_openai_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _INNCUBE_MODELS:
-                api_key = os.getenv("INNCUBE_API_KEY")
-                endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
-                value = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt)
-            elif model in _ANTROPIC_MODELS:
-                api_key = os.getenv("ANTROPIC_API_KEY")
-                value = sort_list_with_antropic_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _GOOGLE_GEMINI_MODELS:
-                value = sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
-            else:
-                raise ValueError(f"Model {model} not supported")
-            cur_results['sum_values'][unsorted_list_name] = value
+
+            sum = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            cur_results['sum_values'][unsorted_list_name] = sum
 
         if config_name in results:
             results[config_name]['results'].append(cur_results)
@@ -487,21 +557,9 @@ def product_unsorted_lists_in_config(model, config_name, lists, cur_results, res
             prompt = f"Get the product from this list: {unsorted_list}."
             if verbose:
                 print(f"Getting product from list {unsorted_list_name} using model {model} for config {config_name}")
-            if model in _OPENAI_MODELS:
-                api_key = os.getenv("OPENAI_API_KEY")
-                value = sort_list_with_openai_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _INNCUBE_MODELS:
-                api_key = os.getenv("INNCUBE_API_KEY")
-                endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
-                value = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt)
-            elif model in _ANTROPIC_MODELS:
-                api_key = os.getenv("ANTROPIC_API_KEY")
-                value = sort_list_with_antropic_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _GOOGLE_GEMINI_MODELS:
-                value = sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
-            else:
-                raise ValueError(f"Model {model} not supported")
-            cur_results['product_values'][unsorted_list_name] = value
+            
+            product = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            cur_results['product_values'][unsorted_list_name] = product
 
         if config_name in results:
             results[config_name]['results'].append(cur_results)
@@ -532,21 +590,9 @@ def min_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             prompt = f"Get the minimum from this list: {unsorted_list}."
             if verbose:
                 print(f"Getting minimum from list {unsorted_list_name} using model {model} for config {config_name}")
-            if model in _OPENAI_MODELS:
-                api_key = os.getenv("OPENAI_API_KEY")
-                value = sort_list_with_openai_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _INNCUBE_MODELS:
-                api_key = os.getenv("INNCUBE_API_KEY")
-                endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
-                value = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt)
-            elif model in _ANTROPIC_MODELS:
-                api_key = os.getenv("ANTROPIC_API_KEY")
-                value = sort_list_with_antropic_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _GOOGLE_GEMINI_MODELS:
-                value = sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
-            else:
-                raise ValueError(f"Model {model} not supported")
-            cur_results['min_values'][unsorted_list_name] = value
+
+            min = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            cur_results['min_values'][unsorted_list_name] = min
 
         if config_name in results:
             results[config_name]['results'].append(cur_results)
@@ -577,21 +623,9 @@ def max_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             prompt = f"Get the maximum from this list: {unsorted_list}."
             if verbose:
                 print(f"Getting maximum from list {unsorted_list_name} using model {model} for config {config_name}")
-            if model in _OPENAI_MODELS:
-                api_key = os.getenv("OPENAI_API_KEY")
-                value = sort_list_with_openai_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _INNCUBE_MODELS:
-                api_key = os.getenv("INNCUBE_API_KEY")
-                endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
-                value = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt)
-            elif model in _ANTROPIC_MODELS:
-                api_key = os.getenv("ANTROPIC_API_KEY")
-                value = sort_list_with_antropic_api(unsorted_list, api_key, model=model, system_prompt=system_prompt, prompt=prompt)
-            elif model in _GOOGLE_GEMINI_MODELS:
-                value = sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
-            else:
-                raise ValueError(f"Model {model} not supported")
-            cur_results['max_values'][unsorted_list_name] = value
+            
+            max = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            cur_results['max_values'][unsorted_list_name] = max
 
         if config_name in results:
             results[config_name]['results'].append(cur_results)
@@ -643,6 +677,15 @@ def run_single_config_for_model(config_name, lists, model="gpt-4o-mini", verbose
             cur_results['index_values'] = {}
             cur_results['index_used'] = {}
             results = get_index_values_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "insert":
+            cur_results['insert_lists'] = {}
+            cur_results['index_used'] = {}
+            cur_results['item_used'] = {}
+            results = insert_values_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "pop":
+            cur_results['pop_lists'] = {}
+            cur_results['index_used'] = {}
+            results = pop_values_in_config(model, config_name, lists, cur_results, results, verbose)
         case "sum":
             for unsorted_list_name, unsorted_list in lists.items():
                 if not all(isinstance(x, (int, float)) for x in unsorted_list):

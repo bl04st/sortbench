@@ -5,6 +5,78 @@ import numpy as np
 from difflib import SequenceMatcher
 from collections import Counter
 
+import util.inference_utils as inf_utils
+
+def compute_insert_score(unsorted_list, insert_list, index_used, item_used):
+    """
+    Compute the insert score between two lists of items. Insert score just checks if the item was inserted at the correct index.
+    It does not consider the order of other items or the correctness of all other items in the list.
+
+    The Method expects that item_used is not in unsorted_list.
+
+    Parameters:
+    - unsorted_list (list): First list of items.
+    - insert_list (list): Second list of items. List should be the unsorted list with one item inserted.
+
+    Returns:
+    - float: Insert score between the two lists.
+    """
+    if index_used is None or item_used is None:
+        return None
+    if index_used < 0 or index_used > len(unsorted_list):
+        return None
+    
+    try:
+        # if the item is at the correct position and the list is 1 item more the score is 1.0 (perfect insertion, not necessarily correct rest of list)
+        if (item_used == insert_list[index_used]) and (len(unsorted_list) == len(insert_list) - 1):
+            return 1.0
+        # if the item is in the list, but at the wrong index the score is 0.5
+        elif (item_used in insert_list):
+            return 0.5
+        # if one item is inserted, but it's the wrong item the score is 0.25
+        elif (len(unsorted_list) == len(insert_list) - 1) and (item_used not in insert_list):
+            return 0.25
+        # if the item is not in the list, the score is 0.0
+        return 0.0
+    except IndexError:
+        # assume index error means wrongful insertion
+        return 0.0
+
+def compute_pop_score(unsorted_list, pop_list, index_used):
+    """
+    Compute the pop score between two lists of items. Pop score just checks if the item was popped at the correct index.
+    It does not consider the order of other items or the correctness of all other items in the list.
+
+    The Method expects that item_used is not in unsorted_list.
+
+    Parameters:
+    - unsorted_list (list): First list of items.
+    - insert_list (list): Second list of items. List should be the unsorted list with one item inserted.
+
+    Returns:
+    - float: Insert score between the two lists.
+    """
+    if index_used is None:
+        return None
+    if index_used < 0 or index_used > len(unsorted_list) - 1:
+        return None
+    
+    try:
+        deleted_item = unsorted_list[index_used]
+        # if the item is not in the pop list and the lengths match the score is 1.0 (perfect deletion, not necessarily correct rest of list)
+        if (deleted_item not in pop_list) and (len(unsorted_list) == len(pop_list) + 1):
+            return 1.0
+        # if the item is in the pop list, but the lengths match (meaning 1 item was popped, just not the correct one) the score is 0.5
+        if (len(unsorted_list) == len(pop_list) + 1) and (deleted_item in pop_list):
+            return 0.5
+        # if the correct item was popped, but the lengths don't match (meaning more than 1 item was removed) the score is 0.25
+        if (len(unsorted_list) != len(pop_list) + 1) and (deleted_item not in pop_list):
+            return 0.25
+        return 0.0
+    except IndexError:
+        # assume index error means wrongful insertion
+        return 0.0
+
 def compute_numeric_similarity_reversed(unsorted_list, reversed_list):
     """
     Compute the numeric similarity between two lists of items.
@@ -138,6 +210,25 @@ def count_missing_items(unsorted_list, sorted_list):
     missing_items = unsorted_counter - sorted_counter
     return sum(missing_items.values())
 
+def count_missing_items_pop(unsorted_list, pop_list):
+    """
+    Count the number of missing items in the pop list compared to the unsorted list.
+
+    Parameters:
+    - unsorted_list (list): A list of items.
+    - pop_list (list): A pop version of the unsorted list
+
+    Returns:
+    - int: The number of missing items in the pop list compared to the unsorted list.
+    """
+    unsorted_counter = Counter(unsorted_list)
+    pop_counter = Counter(pop_list)
+    missing_items = unsorted_counter - pop_counter
+    missing_count = sum(missing_items.values())
+    if missing_count > 0:
+        missing_count = missing_count - 1  # subtract the removed item
+    return missing_count
+
 def count_additional_items(unsorted_list, sorted_list):
     """
     Count the number of additional items in the sorted list compared to the unsorted list.
@@ -153,6 +244,25 @@ def count_additional_items(unsorted_list, sorted_list):
     sorted_counter = Counter(sorted_list)
     additional_items = sorted_counter - unsorted_counter
     return sum(additional_items.values())
+
+def count_additional_items_insert(unsorted_list, insert_list):
+    """
+    Count the number of additional items in the insert list compared to the unsorted list.
+
+    Parameters:
+    - unsorted_list (list): A list of items.
+    - insert_list (list): The insert list to compare against the unsorted list.
+
+    Returns:
+    - int: The number of additional items in the insert list compared to the unsorted list.
+    """
+    unsorted_counter = Counter(unsorted_list)
+    insert_counter = Counter(insert_list)
+    additional_items = insert_counter - unsorted_counter
+    additional_count = sum(additional_items.values())
+    if additional_count > 0:
+        additional_count = additional_count - 1  # subtract the inserted item
+    return additional_count
 
 #########################################
 # Functions for handling parsing errors #
@@ -697,8 +807,8 @@ def eval_str_list(str_list, expected_type, debug=True, config_name='config', mod
 
 def get_result_dict(benchmark_name, bench_type, benchmark_mode, benchmark_version, model, data_type, list_length,
 list_name, unordered_pairs_before=None, unordered_pairs_after=None, unordered_neighbors_before=None, unordered_neighbors_after=None,
-count_missing=None, count_additional=None, numeric_similarity=None, incorrect_items=None, out_list_len=None, num_chars=None,
-thinking_length=None, is_parsed=None, error_type=None, is_list=None, has_ellipsis=None, required_type_parsing=None):
+count_missing=None, count_additional=None, numeric_similarity=None, incorrect_items=None, out_list_len=None,
+num_chars=None, thinking_length=None, is_parsed=None, error_type=None, is_list=None, has_ellipsis=None, required_type_parsing=None, benchmark_score=None):
 
     return {
         'Benchmark': benchmark_name,
@@ -725,7 +835,16 @@ thinking_length=None, is_parsed=None, error_type=None, is_list=None, has_ellipsi
         'ErrorType': error_type,    
         'IsList': is_list,
         'HasEllipsis': has_ellipsis,
-        'RequiredTypeParsing': required_type_parsing
+        'RequiredTypeParsing': required_type_parsing,
+        'Unordered Pairs (%)': None,
+        'Unordered Neighbors (%)': None,
+        'Missing Items (%)': None,
+        'Additional Items (%)': None,
+        'Incorrect Items (%)': None,
+        'Validity Score': None,
+        'Faithfulness Score': None,
+        'Benchmark Score': benchmark_score,
+        'Overall Score': None
     }
 
 
@@ -828,7 +947,7 @@ def eval_reverse_benchmark(results, config_name, cur_result, unsorted_lists, ben
         reversed_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(reversed_list, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
         if reversed_list is None:
             incorrect_items = None
-            cosine_similarity = None
+            numeric_similarity = None
             count_missing = None
             count_additional = None
             out_list_len = None
@@ -851,8 +970,154 @@ def eval_reverse_benchmark(results, config_name, cur_result, unsorted_lists, ben
 
         results_with_eval.append(result_dict)
     return results_with_eval
-    
 
+def eval_insert_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, insert_list in cur_result['insert_lists'].items():
+        index_used = cur_result['index_used'].get(list_name, None)
+        item_used = cur_result['item_used'].get(list_name, None)
+        unsorted_list = unsorted_lists[list_name]
+        expected_type = type(unsorted_list[0])
+        num_chars = len(insert_list)
+        thinking_length = 0
+        thinking_pos = insert_list.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(insert_list[:thinking_pos+8])
+        insert_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(insert_list, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+        if insert_list is None:
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            benchmark_score = compute_insert_score(unsorted_list, insert_list, index_used, item_used)
+            count_missing = count_missing_items(unsorted_list, insert_list)
+            count_additional = count_additional_items_insert(unsorted_list, insert_list)
+            out_list_len = len(insert_list)
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, bench_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name, count_missing=count_missing,
+            count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list,
+            has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing, benchmark_score=benchmark_score
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
+
+def eval_pop_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, pop_list in cur_result['pop_lists'].items():
+        index_used = cur_result['index_used'].get(list_name, None)
+        unsorted_list = unsorted_lists[list_name]
+        expected_type = type(unsorted_list[0])
+        num_chars = len(pop_list)
+        thinking_length = 0
+        thinking_pos = pop_list.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(pop_list[:thinking_pos+8])
+        pop_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(pop_list, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+        if pop_list is None:
+            pop_score = None
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            pop_score = compute_pop_score(unsorted_list, pop_list, index_used)
+            count_missing = count_missing_items_pop(unsorted_list, pop_list)
+            count_additional = count_additional_items(unsorted_list, pop_list)
+            out_list_len = len(pop_list)
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, bench_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name,
+            benchmark_score=pop_score, count_missing=count_missing,
+            count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list,
+            has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
+
+def eval_count_output(count_str, config_name, model_name, list_name, debug=False):
+
+    count = None
+    error_type = None
+    count_str = str(count_str).strip()
+    try:
+        count = int(float(count_str))
+        error_type = None
+    except ValueError:
+        match = re.search(r"-?\d+", count_str)
+        if match:
+            count = int(match.group(0))
+            if match.start() > 0:
+                error_type = "Extra characters before number"
+            elif match.end() < len(count_str):
+                error_type = "Extra characters after number"
+            else:
+                error_type = None
+        else:
+            error_type = "No numeric value found"
+        
+    if debug and count is None:
+        file_name = f'not_parsed_{config_name}_{model_name}_{list_name}.txt'
+        if not os.path.exists(f'known_parsing_errors/{file_name}'):
+            with open(f'debug/{file_name}', 'w') as f:
+                f.write(count_str)
+
+    return count, error_type
+
+def eval_count_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, count in cur_result['list_counts'].items():
+        unsorted_list = unsorted_lists[list_name]
+        num_chars = len(unsorted_list)
+        thinking_length = 0
+        thinking_pos = count.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(count[:thinking_pos+8])
+
+        count, error_type = eval_count_output(count, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+
+        # count output is not a list therefore set these to default values
+        is_list = False
+        has_ellipsis = False
+        required_type_parsing = False
+
+        if count is None:
+            count_score = None
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            count_score = 1.0 if count==len(unsorted_list) else max(0.0, 1 - float(abs(count - len(unsorted_list)) / len(unsorted_list)))
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, bench_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name,
+            benchmark_score=count_score, count_missing=count_missing,
+            count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list,
+            has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
+    
 def evaluate_results(results):
     """
     Evaluate the results of the sorting benchmarks.
@@ -887,6 +1152,18 @@ def evaluate_results(results):
                         results_with_eval.append(res)
                 case "reverse":
                     temp_results = eval_reverse_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length)
+                    for res in temp_results:
+                        results_with_eval.append(res)
+                case "insert":
+                    temp_results = eval_insert_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length)
+                    for res in temp_results:
+                        results_with_eval.append(res)
+                case "pop":
+                    temp_results = eval_pop_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length)
+                    for res in temp_results:
+                        results_with_eval.append(res)
+                case "count":
+                    temp_results = eval_count_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, bench_type, model, benchmark_mode, benchmark_version, data_type, list_length)
                     for res in temp_results:
                         results_with_eval.append(res)
                 case _:
@@ -974,6 +1251,12 @@ def calc_score(row):
         return 1 - (row['Unordered Pairs (%)'] + row['Unordered Neighbors (%)'])/2
     elif row['Benchmark Type'] == 'reverse':
         return 1 - (row['Incorrect Items (%)'] + (1 - row['Numeric Similarity']))/2
+    elif row['Benchmark Type'] == 'insert':
+        return row['Benchmark Score'] # use precomputed insert score
+    elif row['Benchmark Type'] == 'pop':
+        return row['Benchmark Score'] # use precomputed pop score
+    elif row['Benchmark Type'] == 'count':
+        return row['Benchmark Score'] # use precomputed count score
     else:
         return np.nan
 
@@ -987,17 +1270,28 @@ def compute_total_score(df_results):
     Returns:
     - df_results: DataFrame with the total score for each benchmark result
     """
+
+    bench_types = df_results['Benchmark Type']
+
+    # Validity Score for List Type Results:
+    isListType = bench_types.isin(inf_utils.get_list_benchmark_types())
     df_results['Validity Score'] = 0.0
-    df_results.loc[(df_results['Parsed']==True) & (df_results['HasError']==True), 'Validity Score'] = 0.5
-    df_results.loc[(df_results['Parsed']==True) & (df_results['HasError']==True) & (df_results['ErrorType']=='Missing closing bracket'), 'Validity Score'] = 0.75
-    df_results.loc[(df_results['Parsed']==True) & (df_results['HasError']==False) & (df_results['IsList']==False), 'Validity Score'] = 0.75
-    df_results.loc[(df_results['Parsed']==True) & (df_results['HasError']==False) & (df_results['HasEllipsis']==True), 'Validity Score'] = 0.75
-    df_results.loc[(df_results['Parsed']==True) & (df_results['HasError']==False) & (df_results['RequiredTypeParsing']==True), 'Validity Score'] = 0.75
-    df_results.loc[(df_results['Parsed']==True) & (df_results['HasError']==False) & (df_results['IsList']==True) & (df_results['HasEllipsis']==False) & (df_results['RequiredTypeParsing']==False), 'Validity Score'] = 1.0
+    df_results.loc[isListType & (df_results['Parsed']==True) & (df_results['HasError']==True), 'Validity Score'] = 0.5
+    df_results.loc[isListType & (df_results['Parsed']==True) & (df_results['HasError']==True) & (df_results['ErrorType']=='Missing closing bracket'), 'Validity Score'] = 0.75
+    df_results.loc[isListType & (df_results['Parsed']==True) & (df_results['HasError']==False) & (df_results['IsList']==False), 'Validity Score'] = 0.75
+    df_results.loc[isListType & (df_results['Parsed']==True) & (df_results['HasError']==False) & (df_results['HasEllipsis']==True), 'Validity Score'] = 0.75
+    df_results.loc[isListType & (df_results['Parsed']==True) & (df_results['HasError']==False) & (df_results['RequiredTypeParsing']==True), 'Validity Score'] = 0.75
+    df_results.loc[isListType & (df_results['Parsed']==True) & (df_results['HasError']==False) & (df_results['IsList']==True) & (df_results['HasEllipsis']==False) & (df_results['RequiredTypeParsing']==False), 'Validity Score'] = 1.0
+
+    # Validity Score for Single Result Type Results:
+    isSingleResultType = bench_types.isin(inf_utils.get_single_result_benchmark_types())
+    df_results.loc[isSingleResultType & (df_results['Parsed']==True) & (df_results['HasError']==True), 'Validity Score'] = 0.5
+    df_results.loc[isSingleResultType & (df_results['Parsed']==True) & (df_results['HasError']==False), 'Validity Score'] = 1.0
 
     df_results['Benchmark Score'] = df_results.apply(calc_score, axis=1)
     df_results['Faithfulness Score'] = 1-(df_results['Missing Items (%)'] + df_results['Additional Items (%)'])/2
-    df_results.loc[df_results['Validity Score']>0, 'Overall Score'] = df_results['Validity Score']*(df_results['Benchmark Score'] + df_results['Faithfulness Score'])/2
+    df_results.loc[isListType & df_results['Validity Score']>0, 'Overall Score'] = df_results['Validity Score']*(df_results['Benchmark Score'] + df_results['Faithfulness Score'])/2
+    df_results.loc[isSingleResultType & df_results['Validity Score']>0, 'Overall Score'] = df_results['Validity Score']*df_results['Benchmark Score']
     df_results.loc[df_results['Validity Score']==0, 'Overall Score'] = 0
     return df_results
 
