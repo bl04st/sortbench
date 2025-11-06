@@ -24,13 +24,13 @@ def main():
     models = args.model_names
     for model in models:
         if not inference_utils.is_model_supported(model):
-            raise ValueError(f"Model {model} is not supported by sortbench")
+            raise ValueError(f"Model '{model}' is not supported by sortbench")
 
     # Set benchmark types
-    bench_types = args.bench_type
-    for bench_type in bench_types:
-        if not inference_utils.is_benchmark_type_supported(bench_type):
-            raise ValueError(f"Benchmark type {bench_type} is not supported by sortbench")
+    benchmark_types = args.bench_type
+    for benchmark_type in benchmark_types:
+        if not inference_utils.is_benchmark_type_supported(benchmark_type):
+            raise ValueError(f"Benchmark type '{benchmark_type}' is not supported by sortbench")
 
     # Load benchmark data and existing results
     configs = data_utils.load_data_local(file_path=args.data_path, name=args.name, mode=args.mode, version=args.version)
@@ -57,14 +57,14 @@ def main():
 
     for model in models:
         for config_name, lists in configs.items():
-            for bench_type in bench_types:
-                print(f"Running benchmark type: {bench_type} for model: {model} and config: {config_name}")
-                if result_utils.check_if_result_available_on_disk(args.result_path, config_name, model, bench_type=bench_type):
+            for benchmark_type in benchmark_types:
+                print(f"Running benchmark type: '{benchmark_type}' for model: '{model}' and config: '{config_name}'")
+                if result_utils.check_if_result_available_on_disk(args.result_path, config_name, model, benchmark_type=benchmark_type):
                     print(f"Results already available, skipping")
                     continue
                 print('Results not available, running inference')
                 results = result_utils.load_single_result_from_disk(config_name, args.result_path)
-                results = inference_utils.run_single_config_for_model(config_name, lists, model=model, results=results, bench_type=bench_type)
+                results = inference_utils.run_single_config_for_model(config_name, lists, model=model, results=results, benchmark_type=benchmark_type)
                 print('Inference finished, writing results to disk')
                 if results: # only write if results is not empty
                     result_utils.write_results_to_disk(results, file_path=args.result_path, overwrite=True)

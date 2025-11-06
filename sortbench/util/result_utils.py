@@ -88,7 +88,7 @@ def load_single_result_from_disk(config_name, file_path='benchmark_results'):
             print(f"Error while loading results from {filename}: {e}")
     return results
 
-def check_if_result_available_on_disk(results_path, config_name, model_name, bench_type):
+def check_if_result_available_on_disk(results_path, config_name, model_name, benchmark_type):
     """
     Check if results for a specific config and model are already available.
 
@@ -103,7 +103,7 @@ def check_if_result_available_on_disk(results_path, config_name, model_name, ben
         return False
     else:
         for result in results[config_name]['results']:
-            if result['model'] == model_name and result['bench_type'] == bench_type:
+            if result['model'] == model_name and result['benchmark_type'] == benchmark_type:
                 return True
     return False
 

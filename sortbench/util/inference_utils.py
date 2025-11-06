@@ -16,7 +16,8 @@ _INNCUBE_MODELS = ["llama3.1", "gemma2", "qwen2.5", "deepseekr1"]
 _ANTROPIC_MODELS = ["claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022"]
 _GOOGLE_GEMINI_MODELS = ["gemini-2.5-flash"]
 
-LIST_BENCHMARK_TYPES = ["sort", "sort-descending", "reverse", "insert", "pop", "map"]
+TRANSFORM_STRUCTURE_LIST_BENCHMARK_TYPES = ["sort", "sort-descending", "reverse", "insert", "pop"]
+TRANSFORM_VALUES_LIST_BENCHMARK_TYPES = ["uppercase", "square"]
 SINGLE_RESULT_BENCHMARK_TYPES = ["count", "index", "sum", "min", "max", "product"]
 
 
@@ -29,14 +30,14 @@ def is_model_supported(model):
     """
     return model in _OPENAI_MODELS+_INNCUBE_MODELS+_ANTROPIC_MODELS+_GOOGLE_GEMINI_MODELS
 
-def is_benchmark_type_supported(bench_type):
+def is_benchmark_type_supported(benchmark_type):
     """
     Check if a benchmark type is supported by sortbench.
 
     Parameters:
-    - bench_type (str): the benchmark type
+    - benchmark_type (str): the benchmark type
     """
-    return bench_type in LIST_BENCHMARK_TYPES + SINGLE_RESULT_BENCHMARK_TYPES
+    return benchmark_type in TRANSFORM_STRUCTURE_LIST_BENCHMARK_TYPES + TRANSFORM_VALUES_LIST_BENCHMARK_TYPES + SINGLE_RESULT_BENCHMARK_TYPES
 
 def get_single_result_benchmark_types():
     """
@@ -44,11 +45,17 @@ def get_single_result_benchmark_types():
     """
     return SINGLE_RESULT_BENCHMARK_TYPES
 
-def get_list_benchmark_types():
+def get_transform_structure_list_benchmark_types():
     """
-    Get the list of supported list benchmark types.
+    Get the list of supported transform structure benchmark types.
     """
-    return LIST_BENCHMARK_TYPES
+    return TRANSFORM_STRUCTURE_LIST_BENCHMARK_TYPES
+
+def get_transform_values_list_benchmark_types():
+    """
+    Get the list of supported transform values benchmark types.
+    """
+    return TRANSFORM_VALUES_LIST_BENCHMARK_TYPES
 
 def sort_list_with_google_gemini_api(unsorted_list, model, system_prompt=None, prompt=None):
     """
@@ -230,16 +237,16 @@ def sort_unsorted_lists_in_config(model, config_name, lists, cur_results, result
     try:
         for unsorted_list_name, unsorted_list in lists.items():
             if descending:
-                system_prompt = "Your task is to sort a list in descending order according to the common sorting of the used data type in Python. The output must only contain the sorted list and nothing else. The format of the list must stay the same."
+                system_prompt = "Your task is to sort a list in descending order (from largest to smallest) according to the common sorting of the used data type in Python. The output must only contain the sorted list and nothing else. The format of the list must stay the same."
                 prompt = f"Sort the following list in descending order: {unsorted_list}"
             else:
                 system_prompt = None
                 prompt = None
 
             if verbose and not descending:
-                print(f"Sorting list {unsorted_list_name} using model {model} for config {config_name}")
+                print(f"Sorting list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
             elif verbose and descending:
-                print(f"Sorting list {unsorted_list_name} in descending order using model {model} for config {config_name}")
+                print(f"Sorting list '{unsorted_list_name}' in descending order using model '{model}' for config '{config_name}'")
 
             sorted_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             if descending:
@@ -253,7 +260,7 @@ def sort_unsorted_lists_in_config(model, config_name, lists, cur_results, result
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
 
     return results
@@ -276,7 +283,7 @@ def reverse_unsorted_lists_in_config(model, config_name, lists, cur_results, res
             prompt = f"Reverse the following list: {unsorted_list}"
 
             if verbose:
-                print(f"Reversing list {unsorted_list_name} using model {model} for config {config_name}")
+                print(f"Reversing list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
             
             sorted_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['reversed_lists'][unsorted_list_name] = sorted_list
@@ -287,14 +294,14 @@ def reverse_unsorted_lists_in_config(model, config_name, lists, cur_results, res
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
 
     return results
 
-def map_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose=False):
+def uppercase_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose=False):
     """
-    Apply a mapping function to all unsorted lists in a configuration using the specified model.
+    Uppercase all string elements in unsorted lists in a configuration using the specified model.
 
     Parameters:
     - model (str): the model to use for inference
@@ -304,20 +311,19 @@ def map_unsorted_lists_in_config(model, config_name, lists, cur_results, results
     - results (dict): the overall results dictionary
     - verbose (bool): whether to print verbose output
     """
-    map_func = None
     try:
         for unsorted_list_name, unsorted_list in lists.items():
-            if all(isinstance(x, (int, float)) for x in unsorted_list):
-                map_func = "square each number"
-            elif all(isinstance(x, str) for x in unsorted_list):
-                map_func = "convert each string to uppercase"
-            system_prompt = "Your task is to apply a function to all elements in a list. The output must only contain the mapped list and nothing else. The format of the list must stay the same."
-            prompt = f"Apply this function to all list elements: {map_func}.\nThe list is: {unsorted_list}"
+
+            if not all(isinstance(x, str) for x in unsorted_list):
+                raise ValueError("List contains non-string values, cannot uppercase")
+            system_prompt = "Your task is to convert all strings in the list to uppercase. The output must only contain the list and nothing else. The format of the list must stay the same."
+            prompt = f"Uppercase this list: {unsorted_list}"
+
             if verbose:
-                print(f"Mapping list {unsorted_list_name} using mapping function \"{map_func}\" using model {model} for config {config_name}")
+                print(f"Uppercasing list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
 
             mapped_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
-            cur_results['mapped_lists'][unsorted_list_name] = mapped_list
+            cur_results['uppercase_lists'][unsorted_list_name] = mapped_list
 
         if config_name in results:
             results[config_name]['results'].append(cur_results)
@@ -325,9 +331,45 @@ def map_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
-    cur_results['mapping_function'] = map_func
+
+    return results
+
+def square_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose=False):
+    """
+    Square all numeric elements in unsorted lists in a configuration using the specified model.
+
+    Parameters:
+    - model (str): the model to use for inference
+    - config_name (str): the name of the configuration
+    - lists (dict): the dictionary of lists
+    - cur_results (dict): the current results dictionary
+    - results (dict): the overall results dictionary
+    - verbose (bool): whether to print verbose output
+    """
+    try:
+        for unsorted_list_name, unsorted_list in lists.items():
+
+            if not all(isinstance(x, (int, float)) for x in unsorted_list):
+                raise ValueError("List contains non-numeric values, cannot square")
+            system_prompt = "Your task is to square all numbers in the list. The output must only contain the list and nothing else. The format of the list must stay the same."
+            prompt = f"Square this list: {unsorted_list}"
+
+            if verbose:
+                print(f"Squaring list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
+
+            mapped_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            cur_results['squared_lists'][unsorted_list_name] = mapped_list
+
+        if config_name in results:
+            results[config_name]['results'].append(cur_results)
+        else:
+            results[config_name] = {'unsorted_lists': lists,
+                                    'results': [cur_results]}
+    except Exception as e:
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
+        print(traceback.format_exc())
 
     return results
 
@@ -347,10 +389,12 @@ def count_unsorted_list_items_in_config(model, config_name, lists, cur_results, 
         for unsorted_list_name, unsorted_list in lists.items():
             system_prompt = "Your task is to count the number of items in a list. The output must only contain the count and nothing else."
             prompt = f"Count the number of items in this list: {unsorted_list}."
+
             if verbose:
-                print(f"Counting items in list {unsorted_list_name} using model {model} for config {config_name}")
+                print(f"Counting items in list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
+
             count = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
-            cur_results['list_counts'][unsorted_list_name] = count
+            cur_results['count_values'][unsorted_list_name] = count
 
         if config_name in results:
             results[config_name]['results'].append(cur_results)
@@ -358,7 +402,7 @@ def count_unsorted_list_items_in_config(model, config_name, lists, cur_results, 
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
 
     return results
@@ -380,8 +424,9 @@ def get_index_values_in_config(model, config_name, lists, cur_results, results, 
             index = random.randint(0, len(unsorted_list)-1)
             system_prompt = f"Your task is to get the item at a specific index, starting at index 0, from the list. The output must only contain the item and nothing else."
             prompt = f"Get the item at index {index} from this list: {unsorted_list}."
+
             if verbose:
-                print(f"Getting item from list {unsorted_list_name} using model {model} for config {config_name}")
+                print(f"Getting item from list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
             
             value = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['index_values'][unsorted_list_name] = value
@@ -393,7 +438,7 @@ def get_index_values_in_config(model, config_name, lists, cur_results, results, 
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
 
     return results
@@ -426,7 +471,7 @@ def get_random_unique_word(unsorted_list):
 
 def insert_values_in_config(model, config_name, lists, cur_results, results, verbose=False):
     """
-    Insert a value at a random index in all unsorted lists in a configuration using the specified model.
+    Insert a random value at a random index in all unsorted lists in a configuration using the specified model.
 
     Parameters:
     - model (str): the model to use for inference
@@ -451,8 +496,9 @@ def insert_values_in_config(model, config_name, lists, cur_results, results, ver
                 continue
             system_prompt = f"Your task is to insert an item at a specific index, starting at index 0, into a list. The output must only contain the complete list with the inserted element and nothing else."
             prompt = f"Insert the item {item} at index {index} into this list: {unsorted_list}."
+
             if verbose:
-                print(f"Inserting item {item} at index {index} into list {unsorted_list_name} using model {model} for config {config_name}")
+                print(f"Inserting item '{item}' at index '{index}' into list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
             
             insert_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['insert_lists'][unsorted_list_name] = insert_list
@@ -465,14 +511,14 @@ def insert_values_in_config(model, config_name, lists, cur_results, results, ver
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
 
     return results
 
 def pop_values_in_config(model, config_name, lists, cur_results, results, verbose=False):
     """
-    Remove a value at a random index in all unsorted lists in a configuration using the specified model.
+    Pop a value at a random index in all unsorted lists in a configuration using the specified model.
 
     Parameters:
     - model (str): the model to use for inference
@@ -487,8 +533,9 @@ def pop_values_in_config(model, config_name, lists, cur_results, results, verbos
             index = random.randint(0, len(unsorted_list)-1)
             system_prompt = f"Your task is to remove an item at a specific index, starting at index 0, from a list. The output must only contain the complete list without the removed element and nothing else."
             prompt = f"Remove the item at index {index} from this list: {unsorted_list}."
+
             if verbose:
-                print(f"Removing item at index {index} from list {unsorted_list_name} using model {model} for config {config_name}")
+                print(f"Popping item at index '{index}' from list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
 
             pop_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['pop_lists'][unsorted_list_name] = pop_list
@@ -500,7 +547,7 @@ def pop_values_in_config(model, config_name, lists, cur_results, results, verbos
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
 
     return results
@@ -522,8 +569,9 @@ def sum_unsorted_lists_in_config(model, config_name, lists, cur_results, results
 
             system_prompt = f"Your task is to get the sum of all values in a list. The output must only contain the value of the sum and nothing else."
             prompt = f"Get the sum from this list: {unsorted_list}."
+
             if verbose:
-                print(f"Getting sum from list {unsorted_list_name} using model {model} for config {config_name}")
+                print(f"Getting sum from list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
 
             sum = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['sum_values'][unsorted_list_name] = sum
@@ -534,7 +582,7 @@ def sum_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
 
     return results
@@ -555,8 +603,9 @@ def product_unsorted_lists_in_config(model, config_name, lists, cur_results, res
         for unsorted_list_name, unsorted_list in lists.items():
             system_prompt = f"Your task is to get the product of all values in a list. The output must only contain the value of the product and nothing else."
             prompt = f"Get the product from this list: {unsorted_list}."
+
             if verbose:
-                print(f"Getting product from list {unsorted_list_name} using model {model} for config {config_name}")
+                print(f"Getting product from list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
             
             product = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['product_values'][unsorted_list_name] = product
@@ -567,7 +616,7 @@ def product_unsorted_lists_in_config(model, config_name, lists, cur_results, res
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
 
     return results
@@ -588,8 +637,9 @@ def min_unsorted_lists_in_config(model, config_name, lists, cur_results, results
         for unsorted_list_name, unsorted_list in lists.items():
             system_prompt = f"Your task is to get the minimum of all values in a list. The output must only contain the value of the minimum and nothing else."
             prompt = f"Get the minimum from this list: {unsorted_list}."
+
             if verbose:
-                print(f"Getting minimum from list {unsorted_list_name} using model {model} for config {config_name}")
+                print(f"Getting minimum from list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
 
             min = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['min_values'][unsorted_list_name] = min
@@ -600,7 +650,7 @@ def min_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
 
     return results
@@ -621,8 +671,9 @@ def max_unsorted_lists_in_config(model, config_name, lists, cur_results, results
         for unsorted_list_name, unsorted_list in lists.items():
             system_prompt = f"Your task is to get the maximum of all values in a list. The output must only contain the value of the maximum and nothing else."
             prompt = f"Get the maximum from this list: {unsorted_list}."
+
             if verbose:
-                print(f"Getting maximum from list {unsorted_list_name} using model {model} for config {config_name}")
+                print(f"Getting maximum from list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
             
             max = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
             cur_results['max_values'][unsorted_list_name] = max
@@ -633,13 +684,13 @@ def max_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             results[config_name] = {'unsorted_lists': lists,
                                     'results': [cur_results]}
     except Exception as e:
-        print(f"Error while running inference for config {config_name} and model {model}: {e}")
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
 
     return results
 
 
-def run_single_config_for_model(config_name, lists, model="gpt-4o-mini", verbose=True, results=None, bench_type="sort"):
+def run_single_config_for_model(config_name, lists, model="gpt-4o-mini", verbose=True, results=None, benchmark_type="sort"):
     """
     Run inference on all configs for a single model.
 
@@ -649,7 +700,7 @@ def run_single_config_for_model(config_name, lists, model="gpt-4o-mini", verbose
     - model (str): the model to use for inference
     - verbose (bool): whether to print verbose output
     - results (dict): the dictionary of results that already exist to avoid re-running inference
-    - bench_type (str): the benchmark type
+    - benchmark_type (str): the benchmark type
     """
 
     if results is None:
@@ -657,10 +708,10 @@ def run_single_config_for_model(config_name, lists, model="gpt-4o-mini", verbose
         
     cur_results = {}
     cur_results['model'] = model
-    cur_results['bench_type'] = bench_type
+    cur_results['benchmark_type'] = benchmark_type
     # cur_results['sorted_lists'] = {}
 
-    match (bench_type):
+    match (benchmark_type):
         case "sort":
             cur_results['sorted_lists'] = {}
             results = sort_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
@@ -671,7 +722,7 @@ def run_single_config_for_model(config_name, lists, model="gpt-4o-mini", verbose
             cur_results['reversed_lists'] = {}
             results = reverse_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
         case "count":
-            cur_results['list_counts'] = {}
+            cur_results['count_values'] = {}
             results = count_unsorted_list_items_in_config(model, config_name, lists, cur_results, results, verbose)
         case "index":
             cur_results['index_values'] = {}
@@ -714,11 +765,14 @@ def run_single_config_for_model(config_name, lists, model="gpt-4o-mini", verbose
                     return results
             cur_results['max_values'] = {}
             results = max_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "map":
-            cur_results['mapped_lists'] = {}
-            results = map_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "uppercase":
+            cur_results['uppercase_lists'] = {}
+            results = uppercase_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "square":
+            cur_results['squared_lists'] = {}
+            results = square_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
         case _:
-            raise ValueError(f"Benchmark type {bench_type} not supported")
+            raise ValueError(f"Benchmark type {benchmark_type} not supported")
 
     return results
 
