@@ -274,6 +274,8 @@ def extract_thinking_from_model(sorted_list_str, model):
         elif model in _THINKING_MODELS_WITH_TOKEN_OUTPUT:
             thinking_split = sorted_list_str.split('<thinking_token_number>')
             sorted_list, thinking_tokens = thinking_split[0], thinking_split[1]
+        else:
+            sorted_list = sorted_list_str
     except:
         return sorted_list, None, None
     return sorted_list, thinking_text, thinking_tokens
