@@ -3,6 +3,7 @@ import re
 import pandas as pd
 import numpy as np
 import math
+import statistics
 from difflib import SequenceMatcher
 from collections import Counter
 
@@ -173,6 +174,72 @@ def compute_max_score(unsorted_list, max_value):
     else:
         return 0.0
     
+def compute_any_score(unsorted_list, any_value, pivot_index, pivot_value):
+    """
+    Compute the any score of the retuned any value.
+
+    Parameters:
+    - unsorted_list (list): The original unsorted list.
+    - any_value (int/float): The any value to check.
+
+    Returns:
+    - float: The any score.
+    """
+
+    # -1 pivot index means no pivot element was inserted into the list -> no element satisfies condition
+    if pivot_index == -1:
+        return 1.0 if any_value == False else 0.0
+    else:
+        return 1.0 if any_value == True else 0.0
+    
+def compute_all_score(unsorted_list, all_value, pivot_index, pivot_value):
+    """
+    Compute the all score of the retuned all value.
+
+    Parameters:
+    - unsorted_list (list): The original unsorted list.
+    - all_value (int/float): The all value to check.
+
+    Returns:
+    - float: The all score.
+    """
+    
+    # -1 pivot index means no pivot element was inserted into the list -> all elements satisfy condition
+    if pivot_index == -1:
+        return 1.0 if all_value == True else 0.0
+    else:
+        return 1.0 if all_value == False else 0.0
+    
+def compute_median_score(unsorted_list, median_value):
+    """
+    Compute the median score of the retuned median value.
+
+    Parameters:
+    - unsorted_list (list): The original unsorted list.
+    - median_value (int/float/str): The median value to check.
+
+    Returns:
+    - float: The median score.
+    """
+
+    if (all(isinstance(x, (int, float)) for x in unsorted_list)):
+        median = statistics.median(unsorted_list)
+        # account for floating point accuracy
+        if abs(median - median_value) < 1e-6:
+            return 1.0
+        else:
+            return 0.0
+    elif (all(isinstance(x, str) for x in unsorted_list)):
+        sorted_list = sorted(unsorted_list)
+        n = len(sorted_list)
+        median_index = (n - 1) // 2
+        if median_value == sorted_list[median_index]:
+            return 1.0
+        else:
+            return 0.0
+    else:
+        return 0.0
+
 def compute_uppercase_score(unsorted_list, uppercase_list):
     """
     Compute the uppercase score for the uppercase_list compared to the unsorted_list
@@ -232,6 +299,53 @@ def compute_square_score(unsorted_list, squared_list):
     # Compute ratio of correctly uppercased items
     return correct / len(unsorted_list) if len(unsorted_list) > 0 else 0.0
 
+def compute_filter_score(unsorted_list, filtered_list, benchmark_type, pivot):
+    """
+    Compute the filter score and missing and additional items for the filtered_list compared to the unsorted_list
+    The filter score is computed as the F1 score between the expected filtered list and the provided filtered list.
+
+    Parameters:
+    - unsorted_list (list): The original unsorted list.
+    - filtered_list (list): Second list of items. List should be the unsorted list with all items filtered.
+    - benchmark_type (str): The type of filter benchmark.
+    - pivot (int/float): The pivot value used for filtering.
+
+    Returns:
+    - float: A score between 0 and 1 indicating how many elements were correctly filtered.
+    - int: The number of missing items in the filtered list compared to the expected filtered list.
+    - int: The number of additional items in the filtered list compared to the expected filtered list
+    """
+
+    expected_filtered = []
+    if (benchmark_type == "filter-lower"):
+        expected_filtered = list(x for x in unsorted_list if x < pivot)
+    elif (benchmark_type == "filter-higher"):
+        expected_filtered = list(x for x in unsorted_list if x > pivot)
+
+    # Missing and Additional Items for Faithfulness Score, NOT for filter score
+    count_missing = 0 # must be 0 since filtering expects elements to be removed from unsorted_list
+    count_additional = sum(1 for item in filtered_list if item not in unsorted_list)
+
+    true_positives = 0
+    false_positives = 0
+    if (benchmark_type == "filter-lower"):
+        true_positives = sum(1 for item in filtered_list if item < pivot)
+        false_positives = sum(1 for item in filtered_list if item >= pivot)
+    elif (benchmark_type == "filter-higher"):
+        true_positives = sum(1 for item in filtered_list if item > pivot)
+        false_positives = sum(1 for item in filtered_list if item <= pivot)
+    false_negatives = sum(1 for item in expected_filtered if item not in filtered_list)
+
+    if len(filtered_list) > 0:
+        precision = true_positives / (true_positives + false_positives) if true_positives + false_positives > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if true_positives + false_negatives > 0 else 0
+        filter_score = 2 * precision * recall / (precision + recall) if precision + recall > 0 else 0
+    elif len(expected_filtered) == 0:
+        filter_score = 1.0
+    else:
+        filter_score = 0.0
+
+    return filter_score, count_missing, count_additional
 
 def count_non_matching_items_reversed(unsorted_list, reversed_list):
     """
@@ -1046,6 +1160,49 @@ def eval_string_output(str_output, config_name, model_name, list_name, debug=Fal
 
     return parsed_string, error_type
 
+def eval_boolean_output(bool_str, config_name, model_name, list_name, debug=False):
+
+    # strip deepseek reasoning
+    if bool_str.startswith('<think>'):
+        bool_str_org = bool_str # keep original for debugging
+        bool_str = bool_str[bool_str.find('</think>')+8:]
+        bool_str = bool_str.replace('**', '')
+
+    # strip "input()" from all strings as this can trip up eval
+    bool_str = bool_str.replace('input()', '')
+
+    error_type = None
+    bool_str = str(bool_str).strip()
+    if bool_str.lower() == 'true':
+        return True, None
+    elif bool_str.lower() == 'false':
+        return False, None
+    
+    # Find all True/False-occurences
+    matches = list(re.finditer(r"True|False", bool_str))
+    if not matches:
+        return None, "No boolean value found"
+    
+    # Take last True/False occurence
+    last = matches[-1]
+    last_value_str = last.group(0)
+    bool_value = (last_value_str == "True")
+
+    if last.start() > 0:
+        error_type = "Extra characters before boolean"
+    elif last.end() < len(bool_str):
+        error_type = "Extra characters after boolean"
+    else:
+        error_type = None
+
+    if debug and not bool_value:
+        file_name = f'not_parsed_{config_name}_{model_name}_{list_name}.txt'
+        if not os.path.exists(f'known_parsing_errors/{file_name}'):
+            with open(f'debug/{file_name}', 'w') as f:
+                f.write(bool_str)
+
+    return bool_value, error_type
+
 def get_result_dict(benchmark_name, benchmark_type, benchmark_mode, benchmark_version, model, data_type, list_length,
 list_name, unordered_pairs_before=None, unordered_pairs_after=None, unordered_neighbors_before=None, unordered_neighbors_after=None,
 count_missing=None, count_additional=None, numeric_similarity=None, incorrect_items=None, out_list_len=None,
@@ -1101,6 +1258,11 @@ def eval_sort_benchmark(results, config_name, cur_result, unsorted_lists, benchm
         thinking_pos = sorted_list.rfind('</think>')
         if thinking_pos!=-1:
             thinking_length = deepseek_numtokens(sorted_list[:thinking_pos+8])
+        if 'thinking' in cur_result:
+            thinking_length = claude_numtokens(cur_result['thinking'].get(list_name))
+        if 'thinking tokens' in cur_result:
+            thinking_length = cur_result['thinking tokens'].get(list_name)
+
         sorted_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(sorted_list, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
         if sorted_list is None:
             unordered_pairs_before = None
@@ -1143,6 +1305,11 @@ def eval_sort_descending_benchmark(results, config_name, cur_result, unsorted_li
         thinking_pos = sorted_list.rfind('</think>')
         if thinking_pos!=-1:
             thinking_length = deepseek_numtokens(sorted_list[:thinking_pos+8])
+        if 'thinking' in cur_result:
+            thinking_length = claude_numtokens(cur_result['thinking'].get(list_name))
+        if 'thinking tokens' in cur_result:
+            thinking_length = cur_result['thinking tokens'].get(list_name)
+
         sorted_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(sorted_list, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
         if sorted_list is None:
             unordered_pairs_before = None
@@ -1454,6 +1621,102 @@ def eval_sum_benchmark(results, config_name, cur_result, unsorted_lists, benchma
         results_with_eval.append(result_dict)
     return results_with_eval
 
+def eval_any_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, any_str in cur_result['any_values'].items():
+        unsorted_list = unsorted_lists[list_name]
+        pivot_index = cur_result['pivot_index'][list_name]
+        pivot_value = cur_result['pivot_value'][list_name]
+        num_chars = len(any_str)
+        thinking_length = 0
+        thinking_pos = any_str.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(any_str[:thinking_pos+8])
+        if 'thinking' in cur_result:
+            thinking_length = claude_numtokens(cur_result['thinking'].get(list_name))
+        if 'thinking tokens' in cur_result:
+            thinking_length = cur_result['thinking tokens'].get(list_name)
+
+        any_bool, error_type = eval_boolean_output(any_str, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+        
+        is_list = False
+        has_ellipsis = False
+        required_type_parsing = False
+
+        if any_bool is None:
+            any_score = None
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            any_score = compute_any_score(unsorted_list, any_bool, pivot_index, pivot_value)
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, benchmark_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name,
+            benchmark_score=any_score, count_missing=count_missing,
+            count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list,
+            has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
+
+def eval_all_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, all_str in cur_result['all_values'].items():
+        unsorted_list = unsorted_lists[list_name]
+        pivot_index = cur_result['pivot_index'][list_name]
+        pivot_value = cur_result['pivot_value'][list_name]
+        num_chars = len(all_str)
+        thinking_length = 0
+        thinking_pos = all_str.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(all_str[:thinking_pos+8])
+        if 'thinking' in cur_result:
+            thinking_length = claude_numtokens(cur_result['thinking'].get(list_name))
+        if 'thinking tokens' in cur_result:
+            thinking_length = cur_result['thinking tokens'].get(list_name)
+
+        all_bool, error_type = eval_boolean_output(all_str, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+        
+        is_list = False
+        has_ellipsis = False
+        required_type_parsing = False
+
+        if all_bool is None:
+            all_score = None
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            all_score = compute_all_score(unsorted_list, all_bool, pivot_index, pivot_value)
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, benchmark_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name,
+            benchmark_score=all_score, count_missing=count_missing,
+            count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list,
+            has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
+
 def eval_product_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length):
 
     results_with_eval = []
@@ -1555,6 +1818,90 @@ def eval_index_benchmark(results, config_name, cur_result, unsorted_lists, bench
         results_with_eval.append(result_dict)
     return results_with_eval
 
+def eval_filter_lower_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, filter_lower_str in cur_result['filter_lower_lists'].items():
+        unsorted_list = unsorted_lists[list_name]
+        pivot = cur_result['pivot'][list_name]
+        expected_type = type(unsorted_list[0])
+        num_chars = len(unsorted_list)
+        thinking_length = 0
+        thinking_pos = filter_lower_str.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(filter_lower_str[:thinking_pos+8])
+        if 'thinking' in cur_result:
+            thinking_length = claude_numtokens(cur_result['thinking'].get(list_name))
+        if 'thinking tokens' in cur_result:
+            thinking_length = cur_result['thinking tokens'].get(list_name)
+
+        filter_lower_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(filter_lower_str, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+
+        if filter_lower_list is None:
+            filter_score = None
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            filter_score, count_missing, count_additional = compute_filter_score(unsorted_list, filter_lower_list, benchmark_type, pivot)
+            out_list_len = len(filter_lower_list)
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, benchmark_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name,
+            benchmark_score=filter_score, count_missing=count_missing,
+            count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list,
+            has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
+
+def eval_filter_higher_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, filter_higher_str in cur_result['filter_higher_lists'].items():
+        unsorted_list = unsorted_lists[list_name]
+        pivot = cur_result['pivot'][list_name]
+        expected_type = type(unsorted_list[0])
+        num_chars = len(unsorted_list)
+        thinking_length = 0
+        thinking_pos = filter_higher_str.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(filter_higher_str[:thinking_pos+8])
+        if 'thinking' in cur_result:
+            thinking_length = claude_numtokens(cur_result['thinking'].get(list_name))
+        if 'thinking tokens' in cur_result:
+            thinking_length = cur_result['thinking tokens'].get(list_name)
+
+        filter_higher_list, error_type, is_list, has_ellipsis, required_type_parsing = eval_str_list(filter_higher_str, expected_type, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+
+        if filter_higher_list is None:
+            filter_score = None
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            filter_score, count_missing, count_additional = compute_filter_score(unsorted_list, filter_higher_list, benchmark_type, pivot)
+            out_list_len = len(filter_higher_list)
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, benchmark_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name,
+            benchmark_score=filter_score, count_missing=count_missing,
+            count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list,
+            has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
+
 def eval_min_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length):
 
     results_with_eval = []
@@ -1648,6 +1995,55 @@ def eval_max_benchmark(results, config_name, cur_result, unsorted_lists, benchma
 
         results_with_eval.append(result_dict)
     return results_with_eval
+
+def eval_median_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length):
+
+    results_with_eval = []
+
+    for list_name, value_str in cur_result['median_values'].items():
+        unsorted_list = unsorted_lists[list_name]
+        num_chars = len(unsorted_list)
+        thinking_length = 0
+        thinking_pos = value_str.rfind('</think>')
+        if thinking_pos!=-1:
+            thinking_length = deepseek_numtokens(value_str[:thinking_pos+8])
+
+        median_value, error_type = None, "List types not all the same (should not be possible if happens fix fast!!!)"
+        if all(isinstance(x, int) for x in unsorted_list):
+            median_value, error_type = eval_int_output(value_str, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+        elif all(isinstance(x, float) for x in unsorted_list):
+            median_value, error_type = eval_float_output(value_str, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+        elif all(isinstance(x, str) for x in unsorted_list):
+            median_value, error_type = eval_string_output(value_str, debug=True, config_name=config_name, model_name=model, list_name=list_name)
+
+        # min output is not a list therefore set these to default values
+        is_list = False
+        has_ellipsis = False
+        required_type_parsing = False
+
+        if median_value is None:
+            max_score = None
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = False
+        else:
+            max_score = compute_median_score(unsorted_list, median_value)
+            count_missing = None
+            count_additional = None
+            out_list_len = None
+            is_parsed = True
+
+        result_dict = get_result_dict(
+            benchmark_name, benchmark_type, benchmark_mode, benchmark_version, model, data_type, list_length, list_name,
+            benchmark_score=max_score, count_missing=count_missing,
+            count_additional=count_additional, out_list_len=out_list_len, num_chars=num_chars,
+            thinking_length=thinking_length, is_parsed=is_parsed, error_type=error_type, is_list=is_list,
+            has_ellipsis=has_ellipsis, required_type_parsing=required_type_parsing
+        )
+
+        results_with_eval.append(result_dict)
+    return results_with_eval
     
 def evaluate_results(results):
     """
@@ -1717,12 +2113,28 @@ def evaluate_results(results):
                     temp_results = eval_max_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length)
                     for res in temp_results:
                         results_with_eval.append(res)
+                case "any":
+                    temp_results = eval_any_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length)
+                    for res in temp_results:
+                        results_with_eval.append(res)
+                case "all":
+                    temp_results = eval_all_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length)
+                    for res in temp_results:
+                        results_with_eval.append(res)
                 case "uppercase":
                     temp_results = eval_uppercase_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length)
                     for res in temp_results:
                         results_with_eval.append(res)
                 case "square":
                     temp_results = eval_square_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length)
+                    for res in temp_results:
+                        results_with_eval.append(res)
+                case "filter-lower":
+                    temp_results = eval_filter_lower_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length)
+                    for res in temp_results:
+                        results_with_eval.append(res)
+                case "filter-higher":
+                    temp_results = eval_filter_higher_benchmark(results, config_name, cur_result, unsorted_lists, benchmark_name, benchmark_type, model, benchmark_mode, benchmark_version, data_type, list_length)
                     for res in temp_results:
                         results_with_eval.append(res)
                 case _:
@@ -1833,6 +2245,12 @@ def calc_score(row):
         return row['Benchmark Score'] # use precomputed min score
     elif row['Benchmark Type'] == 'max':
         return row['Benchmark Score'] # use precomputed max score
+    elif row['Benchmark Type'] == 'any':
+        return row['Benchmark Score'] # use precomputed any score
+    elif row['Benchmark Type'] == 'all':
+        return row['Benchmark Score'] # use precomputed all score
+    elif row['Benchmark Type'] == 'filter-lower' or row['Benchmark Type'] == 'filter-higher':
+        return row['Benchmark Score'] # use precomputed filter score
     else:
         return np.nan
 
@@ -1870,7 +2288,7 @@ def compute_total_score(df_results):
     df_results.loc[isStructureListType, 'Faithfulness Score'] = 1-(df_results['Missing Items (%)'] + df_results['Additional Items (%)'])/2
     df_results.loc[isTransformListType, 'Faithfulness Score'] = 1.0 - (abs(df_results['Output List Length'] - df_results['Size']) / df_results['Size']).clip(upper=1.0) # judge faithfulness for transform lists only by length difference
     df_results.loc[isListType & df_results['Validity Score']>0, 'Overall Score'] = df_results['Validity Score']*(df_results['Benchmark Score'] + df_results['Faithfulness Score'])/2
-    df_results.loc[isSingleResultType & df_results['Validity Score']>0, 'Overall Score'] = df_results['Validity Score']*df_results['Benchmark Score']
+    df_results.loc[isSingleResultType & df_results['Validity Score']>0, 'Overall Score'] = (df_results['Validity Score']+df_results['Benchmark Score'])/2
     df_results.loc[df_results['Validity Score']==0, 'Overall Score'] = 0
     return df_results
 
@@ -1883,3 +2301,10 @@ deepseekr_tokenizer = AutoTokenizer.from_pretrained("deepseek-ai/DeepSeek-R1-Dis
 
 def deepseek_numtokens(input):
     return deepseekr_tokenizer(input, return_tensors="pt").input_ids.shape[1]
+
+import tiktoken
+
+def claude_numtokens(input):
+    enc = tiktoken.get_encoding('cl100k_base')
+    return len(enc.encode(input))
+    
