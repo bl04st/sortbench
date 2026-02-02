@@ -23,7 +23,7 @@ def main():
 
     kwargs_normal_range = {'min_value': 0, 'max_value': 1000}
     kwargs_large_range = {'min_value': 10000000, 'max_value': 10001000}
-    kwargs_neg_range = {'min_value': -10000, 'max_value': 1000}
+    kwargs_neg_range = {'min_value': -1000, 'max_value': 1000}
     kwargs_small_float = {'min_value': 0, 'max_value': 0.0001}
     kwargs_number_words = {'min_value': 0, 'max_value': 1000}
 

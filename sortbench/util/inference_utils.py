@@ -17,10 +17,10 @@ import anthropic
 _OPENAI_MODELS = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo", "o3-mini", "gpt-4.1-mini", "gpt-5.1_reasoning_none", "gpt-5.1_reasoning_low", "gpt-5-mini_reasoning_minimal"]
 _INNCUBE_MODELS = ["llama3.1", "gemma2", "qwen2.5", "deepseekr1"]
 _ANTROPIC_MODELS = ["claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022", "claude-opus-4-5-20251101", "claude-haiku-4-5-20251001_reasoning_disabled", "claude-sonnet-4-5-20250929_reasoning_disabled", "claude-haiku-4-5-20251001_reasoning_enabled", "claude-sonnet-4-5-20250929_reasoning_enabled"]
-_GOOGLE_GEMINI_MODELS = ["gemini-2.5-flash"]
+_GOOGLE_GEMINI_MODELS = ["gemini-2.5-flash", "gemini-3-flash-preview_reasoning_minimal", "gemini-3-pro-preview_reasoning_low"]
 
 _THINKING_MODELS_WITH_OUTPUT = ["claude-haiku-4-5-20251001_reasoning_enabled", "claude-sonnet-4-5-20250929_reasoning_enabled"]
-_THINKING_MODELS_WITH_TOKEN_OUTPUT = ["gpt-5.1_reasoning_low"]
+_THINKING_MODELS_WITH_TOKEN_OUTPUT = ["gpt-5.1_reasoning_low", "gemini-3-pro-preview_reasoning_low"]
 
 TRANSFORM_STRUCTURE_LIST_BENCHMARK_TYPES = ["sort", "sort-descending", "reverse", "insert", "pop", "filter-lower", "filter-higher"]
 TRANSFORM_VALUES_LIST_BENCHMARK_TYPES = ["uppercase", "square"]
@@ -68,7 +68,7 @@ def get_transform_values_list_benchmark_types():
     """
     return TRANSFORM_VALUES_LIST_BENCHMARK_TYPES
 
-def sort_list_with_google_gemini_api(unsorted_list, model, system_prompt=None, prompt=None):
+def sort_list_with_google_gemini_api(unsorted_list, model, system_prompt=None, prompt=None, reasoning_effort_param='none', max_output_tokens=3000):
     """
     Calls the Google Gemini API to sort a list.
 
@@ -82,15 +82,34 @@ def sort_list_with_google_gemini_api(unsorted_list, model, system_prompt=None, p
         system_prompt = "Your task is to sort a list according to the common sorting of the used data type in Python. The output must only contain the sorted list and nothing else. The format of the list must stay the same."
     if prompt is None:
         prompt = f"Sort the following list: {unsorted_list}"
+    if reasoning_effort_param is not None:
+        reasoning_effort_list = ['none', 'minimal', 'low', 'medium', 'high']
+        reasoning_effort = reasoning_effort_param if reasoning_effort_param in reasoning_effort_list else 'none'
+        if reasoning_effort in ['low', 'medium', 'high']:
+            max_output_tokens = max_output_tokens*2
 
     # The client gets the API key from the environment variable `GEMINI_API_KEY`.
     client = genai.Client()
 
-    response = client.models.generate_content(
+    response = client.interactions.create(
         model=model,
-        contents=f"{system_prompt}\n{prompt}"
+        system_instruction=system_prompt,
+        input=prompt,
+        generation_config={
+            "thinking_level": reasoning_effort,
+            "max_output_tokens": max_output_tokens
+        },
     )
-    sorted_list = response.text
+    sorted_list = ''
+    
+    for dict in response.outputs:
+        if dict.type == "text":
+            sorted_list += dict.text
+
+    if reasoning_effort != 'none' and reasoning_effort != 'minimal':
+        reasoning_tokens = response.usage.total_thought_tokens
+        sorted_list = sorted_list + "<thinking_token_number>" + str(reasoning_tokens)
+
     return sorted_list
 
 def sort_list_with_antropic_api(unsorted_list, api_key, model, reasoning_effort_param='disabled', system_prompt=None, prompt=None, max_tokens=2000, max_reasoning_tokens=2000):
@@ -147,7 +166,7 @@ def sort_list_with_antropic_api(unsorted_list, api_key, model, reasoning_effort_
         final_text = ''
         for block in message.content:
             if block.type == "thinking":
-                thinking_text += block.thinking + "\n"
+                thinking_text += block.thinking
             elif block.type == "text":
                 final_text += block.text
         sorted_list = final_text + "<thinking_block_begin>" + thinking_text
@@ -213,9 +232,9 @@ def sort_list_with_openai_api(unsorted_list, api_key, model, reasoning_effort_pa
             else:
                 if reasoning_effort != 'none' and reasoning_effort != 'minimal':
                     reasoning_tokens = response.usage.output_tokens_details.reasoning_tokens
-                    return response.output_text.strip() + "<thinking_token_number>" + str(reasoning_tokens)
+                    return response.output_text + "<thinking_token_number>" + str(reasoning_tokens)
                 else:
-                    return response.output_text.strip()
+                    return response.output_text
         except Exception as e:
             print(f"Exception running inference: {e}")
             print()
@@ -243,11 +262,11 @@ def call_llm_model_api(model, unsorted_list, system_prompt=None, prompt=None):
             model_reasoning_effort = model_split[2]
         else:
             model_reasoning_effort = 'none'
-        return sort_list_with_openai_api(unsorted_list, api_key, reasoning_effort_param=model_reasoning_effort, model=model_name, max_attempts=2, system_prompt=system_prompt, prompt=prompt, max_tokens=3000)
+        return sort_list_with_openai_api(unsorted_list, api_key, reasoning_effort_param=model_reasoning_effort, model=model_name, max_attempts=2, system_prompt=system_prompt, prompt=prompt, max_tokens=4000)
     elif model in _INNCUBE_MODELS:
         api_key = os.getenv("INNCUBE_API_KEY")
         endpoint_url = "https://llms.innkube.fim.uni-passau.de"
-        return sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt, max_tokens=3000)
+        return sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2, system_prompt=system_prompt, prompt=prompt, max_tokens=4000)
     elif model in _ANTROPIC_MODELS:
         api_key = os.getenv("ANTROPIC_API_KEY")
         model_split = model.split('_')
@@ -256,15 +275,20 @@ def call_llm_model_api(model, unsorted_list, system_prompt=None, prompt=None):
             model_reasoning_effort = model_split[2]
         else:
             model_reasoning_effort = 'disabled'
-        return sort_list_with_antropic_api(unsorted_list, api_key, model=model_name, reasoning_effort_param=model_reasoning_effort, system_prompt=system_prompt, prompt=prompt, max_tokens=3000, max_reasoning_tokens=3000)
+        return sort_list_with_antropic_api(unsorted_list, api_key, model=model_name, reasoning_effort_param=model_reasoning_effort, system_prompt=system_prompt, prompt=prompt, max_tokens=4000, max_reasoning_tokens=4000)
     elif model in _GOOGLE_GEMINI_MODELS:
-        return sort_list_with_google_gemini_api(unsorted_list, model=model, system_prompt=system_prompt, prompt=prompt)
+        model_split = model.split('_')
+        model_name = model_split[0]
+        if len(model_split) > 2:
+            model_reasoning_effort = model_split[2]
+        else:
+            model_reasoning_effort = 'none'
+        return sort_list_with_google_gemini_api(unsorted_list, model=model_name, system_prompt=system_prompt, prompt=prompt, reasoning_effort_param=model_reasoning_effort, max_output_tokens=4000)
     else:
         raise ValueError(f"Model {model} not supported")
     
 def extract_thinking_from_model(sorted_list_str, model):
-    model_split = model.split('_')
-    sorted_list = None
+    sorted_list = sorted_list_str
     thinking_text = None
     thinking_tokens = None
     try:
@@ -274,13 +298,9 @@ def extract_thinking_from_model(sorted_list_str, model):
         elif model in _THINKING_MODELS_WITH_TOKEN_OUTPUT:
             thinking_split = sorted_list_str.split('<thinking_token_number>')
             sorted_list, thinking_tokens = thinking_split[0], thinking_split[1]
-        else:
-            sorted_list = sorted_list_str
     except:
         return sorted_list, None, None
     return sorted_list, thinking_text, thinking_tokens
-
-
 
 def sort_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose=False, descending=False):
     """
@@ -322,40 +342,6 @@ def sort_unsorted_lists_in_config(model, config_name, lists, cur_results, result
                 cur_results['sorted_lists_descending'][unsorted_list_name] = sorted_list
             else:
                 cur_results['sorted_lists'][unsorted_list_name] = sorted_list
-
-        if config_name in results:
-            results[config_name]['results'].append(cur_results)
-        else:
-            results[config_name] = {'unsorted_lists': lists,
-                                    'results': [cur_results]}
-    except Exception as e:
-        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
-        print(traceback.format_exc())
-
-    return results
-
-def reverse_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose=False):
-    """
-    Reverse all unsorted lists in a configuration using the specified model.
-
-    Parameters:
-    - model (str): the model to use for inference
-    - config_name (str): the name of the configuration
-    - lists (dict): the dictionary of lists
-    - cur_results (dict): the current results dictionary
-    - results (dict): the overall results dictionary
-    - verbose (bool): whether to print verbose output
-    """
-    try:
-        for unsorted_list_name, unsorted_list in lists.items():
-            system_prompt = "Your task is to reverse a list according to the common list.reverse() operation in Python. The output must only contain the reversed list and nothing else. The format of the list must stay the same."
-            prompt = f"Reverse the following list: {unsorted_list}"
-
-            if verbose:
-                print(f"Reversing list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
-            
-            sorted_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
-            cur_results['reversed_lists'][unsorted_list_name] = sorted_list
 
         if config_name in results:
             results[config_name]['results'].append(cur_results)
@@ -545,7 +531,7 @@ def any_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             prompt = "Determine whether any element in the following list satisfies this condition: " + condition + f"\n{unsorted_list}"
 
             if verbose:
-                print(f"Getting any condition in list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
+                print(f"Getting any condition in list '{unsorted_list_name}' using model '{model}' and pivot '{pivot_value}' for config '{config_name}'")
 
             any_bool = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
 
@@ -623,7 +609,7 @@ def all_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             prompt = "Determine whether all elements in the following list satisfy this condition: " + condition + f"\n{unsorted_list}"
 
             if verbose:
-                print(f"Getting all condition in list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
+                print(f"Getting all condition in list '{unsorted_list_name}' using model '{model}' and pivot '{pivot_value}' for config '{config_name}'")
 
             all_bool = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
 
@@ -636,6 +622,205 @@ def all_unsorted_lists_in_config(model, config_name, lists, cur_results, results
             cur_results['all_values'][unsorted_list_name] = all_bool
             cur_results['pivot_index'][unsorted_list_name] = pivot_index
             cur_results['pivot_value'][unsorted_list_name] = pivot_value
+
+        if config_name in results:
+            results[config_name]['results'].append(cur_results)
+        else:
+            results[config_name] = {'unsorted_lists': lists,
+                                    'results': [cur_results]}
+    except Exception as e:
+        print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
+        print(traceback.format_exc())
+
+    return results
+
+def run_single_config_for_model(config_name, lists, model="gpt-4o-mini", verbose=True, results=None, benchmark_type="sort"):
+    """
+    Run inference on all configs for a single model.
+
+    Parameters:
+    - configs (dict): the dictionary of configs
+    - api_key (str): the OpenAI API key
+    - model (str): the model to use for inference
+    - verbose (bool): whether to print verbose output
+    - results (dict): the dictionary of results that already exist to avoid re-running inference
+    - benchmark_type (str): the benchmark type
+    """
+
+    if results is None:
+        results = {}
+        
+    cur_results = {}
+    cur_results['model'] = model
+    cur_results['benchmark_type'] = benchmark_type
+    if is_thinking_model_with_thinking_output(model):
+        cur_results['thinking'] = {}
+    if is_thinking_model_with_thinking_summary(model):
+        cur_results['thinking_tokens'] = {}
+
+    match (benchmark_type):
+        case "sort":
+            cur_results['sorted_lists'] = {}
+            results = sort_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "sort-descending":
+            cur_results['sorted_lists_descending'] = {}
+            results = sort_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose, descending=True)
+        case "reverse":
+            cur_results['reversed_lists'] = {}
+            results = reverse_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "count":
+            cur_results['count_values'] = {}
+            results = count_unsorted_list_items_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "index":
+            cur_results['index_values'] = {}
+            cur_results['index_used'] = {}
+            results = get_index_values_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "insert":
+            cur_results['insert_lists'] = {}
+            cur_results['index_used'] = {}
+            cur_results['item_used'] = {}
+            results = insert_values_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "pop":
+            cur_results['pop_lists'] = {}
+            cur_results['index_used'] = {}
+            results = pop_values_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "sum":
+            for unsorted_list_name, unsorted_list in lists.items():
+                if not all(isinstance(x, (int, float)) for x in unsorted_list):
+                    warnings.warn(f"List {unsorted_list_name} contains non-numeric values. Skipping sum benchmark.")
+                    return results
+            cur_results['sum_values'] = {}
+            results = sum_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "product":
+            for unsorted_list_name, unsorted_list in lists.items():
+                if not all(isinstance(x, (int, float)) for x in unsorted_list):
+                    warnings.warn(f"List {unsorted_list_name} contains non-numeric values. Skipping product benchmark.")
+                    return results
+            cur_results['product_values'] = {}
+            results = product_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "min":
+            cur_results['min_values'] = {}
+            results = min_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "max":
+            cur_results['max_values'] = {}
+            results = max_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "median":
+            cur_results['median_values'] = {}
+            results = median_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "uppercase":
+            for unsorted_list_name, unsorted_list in lists.items():
+                if not all(isinstance(x, (str)) for x in unsorted_list):
+                    warnings.warn(f"List {unsorted_list_name} contains non-string values. Skipping uppercase benchmark.")
+                    return results
+            cur_results['uppercase_lists'] = {}
+            results = uppercase_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "square":
+            for unsorted_list_name, unsorted_list in lists.items():
+                if not all(isinstance(x, (int, float)) for x in unsorted_list):
+                    warnings.warn(f"List {unsorted_list_name} contains non-numeric values. Skipping square benchmark.")
+                    return results
+            cur_results['squared_lists'] = {}
+            results = square_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "filter-lower":
+            cur_results['filter_lower_lists'] = {}
+            cur_results['pivot'] = {}
+            results = filter_unsorted_lists_in_config(model, config_name, lists, cur_results, results, "lower", verbose)
+        case "filter-higher":
+            cur_results['filter_higher_lists'] = {}
+            cur_results['pivot'] = {}
+            results = filter_unsorted_lists_in_config(model, config_name, lists, cur_results, results, "higher", verbose)
+        case "any":
+            cur_results['any_values'] = {}
+            cur_results['pivot_index'] = {}
+            cur_results['pivot_value'] = {}
+            results = any_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case "all":
+            cur_results['all_values'] = {}
+            cur_results['pivot_index'] = {}
+            cur_results['pivot_value'] = {}
+            results = all_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
+        case _:
+            raise ValueError(f"Benchmark type {benchmark_type} not supported")
+
+    return results
+
+def run_configs_for_single_model(configs, model="gpt-4o-mini", verbose=True, results=None):
+    """
+    Run inference on all configs for a single model.
+
+    Parameters:
+    - configs (dict): the dictionary of configs
+    - api_key (str): the OpenAI API key
+    - model (str): the model to use for inference
+    - verbose (bool): whether to print verbose output
+    - results (dict): the dictionary of results that already exist to avoid re-running inference
+    """
+    if not is_model_supported(model):
+        raise ValueError(f"Model {model} not supported")
+
+    if results is None:
+        results = {}    
+    for config_name, lists in configs.items():
+        if check_if_result_available(results, config_name, model):
+            if verbose:
+                print(f"Results for config {config_name} and model {model} already available. Skipping.")
+            continue
+        cur_results = {}
+        cur_results['model'] = model
+        cur_results['sorted_lists'] = {}
+        
+        try:
+            for unsorted_list_name, unsorted_list in lists.items():
+                if verbose:
+                    print(f"Sorting list {unsorted_list_name} using model {model} for config {config_name}")
+                if model in _OPENAI_MODELS:
+                    api_key = os.getenv("OPENAI_API_KEY")
+                    sorted_list = sort_list_with_openai_api(unsorted_list, api_key, model=model)
+                elif model in _INNCUBE_MODELS:
+                    api_key = os.getenv("INNCUBE_API_KEY")
+                    endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
+                    sorted_list = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2)
+                elif model in _ANTROPIC_MODELS:
+                    api_key = os.getenv("ANTROPIC_API_KEY")
+                    sorted_list = sort_list_with_antropic_api(unsorted_list, api_key, model=model)
+                else:
+                    raise ValueError(f"Model {model} not supported")
+                cur_results['sorted_lists'][unsorted_list_name] = sorted_list
+        
+            results[config_name] = {'unsorted_lists': lists,
+                                    'results': [cur_results]}
+        except Exception as e:
+            print(f"Error while running inference for config {config_name} and model {model}: {e}")
+            print(traceback.format_exc())
+
+    return results
+
+############################
+##### unused functions #####
+############################
+
+def reverse_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose=False):
+    """
+    Reverse all unsorted lists in a configuration using the specified model.
+
+    Parameters:
+    - model (str): the model to use for inference
+    - config_name (str): the name of the configuration
+    - lists (dict): the dictionary of lists
+    - cur_results (dict): the current results dictionary
+    - results (dict): the overall results dictionary
+    - verbose (bool): whether to print verbose output
+    """
+    try:
+        for unsorted_list_name, unsorted_list in lists.items():
+            system_prompt = "Your task is to reverse a list according to the common list.reverse() operation in Python. The output must only contain the reversed list and nothing else. The format of the list must stay the same."
+            prompt = f"Reverse the following list: {unsorted_list}"
+
+            if verbose:
+                print(f"Reversing list '{unsorted_list_name}' using model '{model}' for config '{config_name}'")
+            
+            sorted_list = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            cur_results['reversed_lists'][unsorted_list_name] = sorted_list
 
         if config_name in results:
             results[config_name]['results'].append(cur_results)
@@ -1068,167 +1253,5 @@ def median_unsorted_lists_in_config(model, config_name, lists, cur_results, resu
     except Exception as e:
         print(f"Error while running inference for config '{config_name}' and model '{model}': {e}")
         print(traceback.format_exc())
-
-    return results
-
-def run_single_config_for_model(config_name, lists, model="gpt-4o-mini", verbose=True, results=None, benchmark_type="sort"):
-    """
-    Run inference on all configs for a single model.
-
-    Parameters:
-    - configs (dict): the dictionary of configs
-    - api_key (str): the OpenAI API key
-    - model (str): the model to use for inference
-    - verbose (bool): whether to print verbose output
-    - results (dict): the dictionary of results that already exist to avoid re-running inference
-    - benchmark_type (str): the benchmark type
-    """
-
-    if results is None:
-        results = {}
-        
-    cur_results = {}
-    cur_results['model'] = model
-    cur_results['benchmark_type'] = benchmark_type
-    if is_thinking_model_with_thinking_output(model):
-        cur_results['thinking'] = {}
-    if is_thinking_model_with_thinking_summary(model):
-        cur_results['thinking_tokens'] = {}
-
-    match (benchmark_type):
-        case "sort":
-            cur_results['sorted_lists'] = {}
-            results = sort_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "sort-descending":
-            cur_results['sorted_lists_descending'] = {}
-            results = sort_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose, descending=True)
-        case "reverse":
-            cur_results['reversed_lists'] = {}
-            results = reverse_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "count":
-            cur_results['count_values'] = {}
-            results = count_unsorted_list_items_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "index":
-            cur_results['index_values'] = {}
-            cur_results['index_used'] = {}
-            results = get_index_values_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "insert":
-            cur_results['insert_lists'] = {}
-            cur_results['index_used'] = {}
-            cur_results['item_used'] = {}
-            results = insert_values_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "pop":
-            cur_results['pop_lists'] = {}
-            cur_results['index_used'] = {}
-            results = pop_values_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "sum":
-            for unsorted_list_name, unsorted_list in lists.items():
-                if not all(isinstance(x, (int, float)) for x in unsorted_list):
-                    warnings.warn(f"List {unsorted_list_name} contains non-numeric values. Skipping sum benchmark.")
-                    return results
-            cur_results['sum_values'] = {}
-            results = sum_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "product":
-            for unsorted_list_name, unsorted_list in lists.items():
-                if not all(isinstance(x, (int, float)) for x in unsorted_list):
-                    warnings.warn(f"List {unsorted_list_name} contains non-numeric values. Skipping product benchmark.")
-                    return results
-            cur_results['product_values'] = {}
-            results = product_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "min":
-            cur_results['min_values'] = {}
-            results = min_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "max":
-            cur_results['max_values'] = {}
-            results = max_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "median":
-            cur_results['median_values'] = {}
-            results = median_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "uppercase":
-            for unsorted_list_name, unsorted_list in lists.items():
-                if not all(isinstance(x, (str)) for x in unsorted_list):
-                    warnings.warn(f"List {unsorted_list_name} contains non-string values. Skipping uppercase benchmark.")
-                    return results
-            cur_results['uppercase_lists'] = {}
-            results = uppercase_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "square":
-            for unsorted_list_name, unsorted_list in lists.items():
-                if not all(isinstance(x, (int, float)) for x in unsorted_list):
-                    warnings.warn(f"List {unsorted_list_name} contains non-numeric values. Skipping square benchmark.")
-                    return results
-            cur_results['squared_lists'] = {}
-            results = square_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "filter-lower":
-            cur_results['filter_lower_lists'] = {}
-            cur_results['pivot'] = {}
-            results = filter_unsorted_lists_in_config(model, config_name, lists, cur_results, results, "lower", verbose)
-        case "filter-higher":
-            cur_results['filter_higher_lists'] = {}
-            cur_results['pivot'] = {}
-            results = filter_unsorted_lists_in_config(model, config_name, lists, cur_results, results, "higher", verbose)
-        case "any":
-            cur_results['any_values'] = {}
-            cur_results['pivot_index'] = {}
-            cur_results['pivot_value'] = {}
-            results = any_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case "all":
-            cur_results['all_values'] = {}
-            cur_results['pivot_index'] = {}
-            cur_results['pivot_value'] = {}
-            results = all_unsorted_lists_in_config(model, config_name, lists, cur_results, results, verbose)
-        case _:
-            raise ValueError(f"Benchmark type {benchmark_type} not supported")
-
-    return results
-
-
-def run_configs_for_single_model(configs, model="gpt-4o-mini", verbose=True, results=None):
-    """
-    Run inference on all configs for a single model.
-
-    Parameters:
-    - configs (dict): the dictionary of configs
-    - api_key (str): the OpenAI API key
-    - model (str): the model to use for inference
-    - verbose (bool): whether to print verbose output
-    - results (dict): the dictionary of results that already exist to avoid re-running inference
-    """
-    if not is_model_supported(model):
-        raise ValueError(f"Model {model} not supported")
-
-    if results is None:
-        results = {}    
-    for config_name, lists in configs.items():
-        if check_if_result_available(results, config_name, model):
-            if verbose:
-                print(f"Results for config {config_name} and model {model} already available. Skipping.")
-            continue
-        cur_results = {}
-        cur_results['model'] = model
-        cur_results['sorted_lists'] = {}
-        
-        try:
-            for unsorted_list_name, unsorted_list in lists.items():
-                if verbose:
-                    print(f"Sorting list {unsorted_list_name} using model {model} for config {config_name}")
-                if model in _OPENAI_MODELS:
-                    api_key = os.getenv("OPENAI_API_KEY")
-                    sorted_list = sort_list_with_openai_api(unsorted_list, api_key, model=model)
-                elif model in _INNCUBE_MODELS:
-                    api_key = os.getenv("INNCUBE_API_KEY")
-                    endpoint_url = "https://llms-inference.innkube.fim.uni-passau.de"
-                    sorted_list = sort_list_with_openai_api(unsorted_list, api_key, model=model, url=endpoint_url, use_streaming=True, max_attempts=2)
-                elif model in _ANTROPIC_MODELS:
-                    api_key = os.getenv("ANTROPIC_API_KEY")
-                    sorted_list = sort_list_with_antropic_api(unsorted_list, api_key, model=model)
-                else:
-                    raise ValueError(f"Model {model} not supported")
-                cur_results['sorted_lists'][unsorted_list_name] = sorted_list
-        
-            results[config_name] = {'unsorted_lists': lists,
-                                    'results': [cur_results]}
-        except Exception as e:
-            print(f"Error while running inference for config {config_name} and model {model}: {e}")
-            print(traceback.format_exc())
 
     return results
