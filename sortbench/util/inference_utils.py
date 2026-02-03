@@ -494,6 +494,7 @@ def any_unsorted_lists_in_config(model, config_name, lists, cur_results, results
         for unsorted_list_name, unsorted_list in lists.items():
             system_prompt = "Your task is to determine whether any element in a python list satisfies a condition. The output must only consist of either 'True' or 'False' and no extra text."
 
+            unsorted_list_copy = unsorted_list.copy()
             pivot_index = -1
             pivot_value = None
             condition = ""
@@ -513,7 +514,7 @@ def any_unsorted_lists_in_config(model, config_name, lists, cur_results, results
                         pivot_value = min_value - delta
                         if all(isinstance(x, int) for x in unsorted_list):
                             pivot_value = math.floor(pivot_value)
-                    unsorted_list[pivot_index] = pivot_value
+                    unsorted_list_copy[pivot_index] = pivot_value
             else:
                 min_value = min(unsorted_list)
                 max_value = max(unsorted_list)
@@ -526,14 +527,14 @@ def any_unsorted_lists_in_config(model, config_name, lists, cur_results, results
                     if pivot_value == "":
                         make_smaller = not make_smaller
                         pivot_value = get_outlier_string(min_value, max_value, make_smaller=make_smaller)
-                    unsorted_list[pivot_index] = pivot_value
+                    unsorted_list_copy[pivot_index] = pivot_value
             
-            prompt = "Determine whether any element in the following list satisfies this condition: " + condition + f"\n{unsorted_list}"
+            prompt = "Determine whether any element in the following list satisfies this condition: " + condition + f"\n{unsorted_list_copy}"
 
             if verbose:
                 print(f"Getting any condition in list '{unsorted_list_name}' using model '{model}' and pivot '{pivot_value}' for config '{config_name}'")
 
-            any_bool = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            any_bool = call_llm_model_api(model, unsorted_list_copy, system_prompt=system_prompt, prompt=prompt)
 
             any_bool, thinking_string, thinking_tokens = extract_thinking_from_model(any_bool, model)
             if thinking_string != None:
@@ -572,6 +573,7 @@ def all_unsorted_lists_in_config(model, config_name, lists, cur_results, results
         for unsorted_list_name, unsorted_list in lists.items():
             system_prompt = "Your task is to determine whether all elements in a python list satisfy a condition. The output must only consist of either 'True' or 'False' and no extra text."
 
+            unsorted_list_copy = unsorted_list.copy()
             pivot_index = -1
             pivot_value = None
             condition = ""
@@ -591,7 +593,7 @@ def all_unsorted_lists_in_config(model, config_name, lists, cur_results, results
                         pivot_value = min_value - delta
                         if all(isinstance(x, int) for x in unsorted_list):
                             pivot_value = math.floor(pivot_value)
-                    unsorted_list[pivot_index] = pivot_value
+                    unsorted_list_copy[pivot_index] = pivot_value
             else:
                 min_value = min(unsorted_list)
                 max_value = max(unsorted_list)
@@ -604,14 +606,14 @@ def all_unsorted_lists_in_config(model, config_name, lists, cur_results, results
                     if pivot_value == "":
                         make_smaller = not make_smaller
                         pivot_value = get_outlier_string(min_value, max_value, make_smaller=make_smaller)
-                    unsorted_list[pivot_index] = pivot_value
+                    unsorted_list_copy[pivot_index] = pivot_value
 
-            prompt = "Determine whether all elements in the following list satisfy this condition: " + condition + f"\n{unsorted_list}"
+            prompt = "Determine whether all elements in the following list satisfy this condition: " + condition + f"\n{unsorted_list_copy}"
 
             if verbose:
                 print(f"Getting all condition in list '{unsorted_list_name}' using model '{model}' and pivot '{pivot_value}' for config '{config_name}'")
 
-            all_bool = call_llm_model_api(model, unsorted_list, system_prompt=system_prompt, prompt=prompt)
+            all_bool = call_llm_model_api(model, unsorted_list_copy, system_prompt=system_prompt, prompt=prompt)
 
             all_bool, thinking_string, thinking_tokens = extract_thinking_from_model(all_bool, model)
             if thinking_string != None:
