@@ -4,7 +4,8 @@ SortBench is a sorting-based benchmark for Large Language Models (LLMs).
 
 ## Reproducing the benchmark
 
-In the following we describe the steps to reproduce our results. Everything we describe works as is on Ubuntu 24.04 LTS. 
+In the following we describe the steps to reproduce our results. Everything we describe works as is on Ubuntu 24.04 LTS.
+To replicate the v2.0 benchmark change the --version argument to `v2.0`.
 
 ### Setting up the environment
 
@@ -43,6 +44,7 @@ For reproducibiliy, each version of the benchmark uses a different, random but f
 | Version | Basic Seed | Advanced Seed | Debug Seed |
 | ------- | ---------- | ------------- | ---------- |
 | v1.0    | 42415      | 56671         | 19837      |
+| v2.0    | 43467      | 83841         | -          |
 
 ### Running the benchmark
 
@@ -58,13 +60,24 @@ We currently support the following models from Open AI:
 - `gpt-4o`: OpenAI's GPT-4 (large)
 - `gpt-4o-mini`: OpenAI's GPT-4 (mini)
 - `o3-mini`: OpenAI's o3-mini model
-- 'o1`: OpenAI's o1 model
+- `o1`: OpenAI's o1 model
 
 The Inncube cluster currently hosts the following models:
 - `llama3.1`: Meta's LLAMA 3.1
 - `gemma2`: Google's Gemma 2
 - `qwen2.5`: Alibaba's Qwen 2.5
 - `deepseekr1`: DeepSeek's r1 model
+
+In v2.0 we added:
+- `gpt-5.1_reasoning_none`: OpenAI's GPT-5.1 (without reasoning)
+- `gpt-5.1_reasoning_none`: OpenAI's GPT-5.1 (low reasoning)
+- `gpt-5-mini_reasoning_minimal`: OpenAI's GPT-5-mini (minimal/without reasoning)
+- `gemini-3-pro`: Google's Gemini-pro (low reasoning)
+- `gemini-3-flash-preview_reasoning_minimal`: Google's Gemini-pro (minimal/without reasoning)
+- `claude-haiku-4-5-20251001_reasoning_disabled`: Anthropics Claude Haiku (without reasoning)
+- `claude-haiku-4-5-20251001_reasoning_enabled`: Anthropics Claude Haiku (with reasoning)
+- `claude-sonnet-4-5-20251001_reasoning_disabled`: Anthropics Claude Sonnet (without reasoning)
+- `claude-sonnet-4-5-20251001_reasoning_enabled`: Anthropics Claude Sonnet (with reasoning)
 
 To run the benchmark, run the following command:
 
@@ -73,6 +86,9 @@ python sortbench/create_results.py --mode=basic --version=v1.0 --model_names gpt
 python sortbench/create_results.py --mode=advanced --version=v1.0 --model_names gpt-4o gpt-4o-mini
 python sortbench/create_results.py --mode=debug --version=v1.0 --model_names gpt-4o gpt-4o-mini
 ```
+
+In v2.0 we added the bench_type argument, where you can choose what benchmark types you want to run. Default is `sort`.
+We ran the following benchmarks: `sort, sort-descending, filter-higher, filter-lower, any, all`.
 
 If you want to add your own models or endpoints to the benchmark, you need to modify the sortbench/util/inference_utils.py accordingly. 
 
